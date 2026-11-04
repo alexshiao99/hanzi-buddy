@@ -1,0 +1,25 @@
+{
+  "name": "hanzi-buddy",
+  "version": "0.1.0",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "start": "node scripts/build.mjs && electron .",
+    "test:lookup": "node scripts/build.mjs && node dist/test-lookup.js",
+    "postinstall": "node scripts/fetch-dict.mjs"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "pinyin-pro": "^3.29.5"
+  },
+  "description": "Floating Chinese lookup: pinyin, translation, read-aloud, saved word review",
+  "devDependencies": {
+    "@types/node": "^18.19.130",
+    "electron": "^33.4.11",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2"
+  },
+  "productName": "Hanzi Buddy",
+  "private": true
+}

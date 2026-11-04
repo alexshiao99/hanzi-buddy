@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'" />
+    <title>Hanzi Buddy</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div id="card">
+      <header class="drag">
+        <span class="brand" title="Hanzi Buddy">汉</span>
+        <nav class="tabs no-drag">
+          <button data-view="lookup" class="active">Lookup</button>
+          <button data-view="saved">Saved <span id="saved-count" class="badge"></span></button>
+          <button data-view="review">Review</button>
+        </nav>
+        <div class="controls no-drag">
+          <button id="btn-mode" class="icon" title="Hidden mode">◌</button>
+          <button id="btn-watch" class="icon" title="Watching clipboard (click to pause)">●</button>
+          <button id="btn-pin" class="icon" title="Always on top">⇡</button>
+          <button id="btn-close" class="icon" title="Hide (reopen from 汉 in the menu bar)">✕</button>
+        </div>
+      </header>
+
+      <main>
+        <section id="view-lookup" class="view">
+          <div id="empty" class="hint">
+            <div class="hint-big">复制 · 学习</div>
+            <p>Copy any Chinese text, or highlight it and press <kbd>⌘</kbd><kbd>⇧</kbd><kbd>Y</kbd>.</p>
+          </div>
+          <div id="result" hidden>
+            <div id="hanzi" class="hanzi"></div>
+            <div id="pinyin-line" class="pinyin-line"></div>
+            <div id="translation" class="translation"></div>
+            <div class="actions">
+              <button id="btn-speak" title="Read aloud">🔊 Listen</button>
+              <button id="btn-slow" title="Read aloud slowly">🐢 Slow</button>
+              <button id="btn-save" title="Save to your list">☆ Save</button>
+              <button id="btn-copy-pinyin" title="Copy pinyin">Copy pinyin</button>
+            </div>
+            <details id="words">
+              <summary>Word by word</summary>
+              <ul id="word-list" class="word-list"></ul>
+            </details>
+          </div>
+        </section>
+
+        <section id="view-saved" class="view" hidden>
+          <div class="toolbar">
+            <input id="search" type="search" placeholder="Search hanzi, pinyin, meaning…" />
+            <button id="btn-export" title="Export as CSV (Anki-importable)">Export</button>
+          </div>
+          <ul id="saved-list" class="saved-list"></ul>
+          <div id="saved-empty" class="hint" hidden>Nothing saved yet. Press ☆ Save on a lookup.</div>
+        </section>
+
+        <section id="view-review" class="view" hidden>
+          <div id="review-empty" class="hint" hidden>Save a few words first, then review them here.</div>
+          <div id="review" hidden>
+            <div id="review-stats" class="review-stats"></div>
+            <button id="review-card" class="review-card" title="Click or press Space to reveal">
+              <div id="review-hanzi" class="review-hanzi"></div>
+              <div id="review-answer" class="review-answer" hidden>
+                <div id="review-pinyin" class="review-pinyin"></div>
+                <div id="review-meaning" class="review-meaning"></div>
+              </div>
+              <div id="review-prompt" class="review-prompt">tap to reveal</div>
+            </button>
+            <div class="actions review-actions">
+              <button id="btn-review-speak">🔊</button>
+              <button id="btn-again" class="again" disabled>Again <kbd>1</kbd></button>
+              <button id="btn-got" class="got" disabled>Got it <kbd>2</kbd></button>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <div id="toast" class="toast" hidden></div>
+    </div>
+    <script src="app.js"></script>
+  </body>
+</html>
