@@ -55,9 +55,16 @@ export interface Settings {
    * hidden: no window; highlighted Chinese is watched and the hotkey opens a popup at the cursor.
    */
   mode: AppMode;
+  /** Send looked-up text to online translators. Dictionary, pinyin and speech never leave the Mac. */
+  onlineTranslation: boolean;
+  /** Nothing is sent online until the first-run notice has been answered. */
+  translationNoticeSeen: boolean;
+  savedSort: SavedSort;
 }
 
 export type AppMode = 'card' | 'hidden';
+
+export type SavedSort = 'recent' | 'pinyin' | 'practice';
 
 export type IncomingSource = 'clipboard' | 'hotkey';
 

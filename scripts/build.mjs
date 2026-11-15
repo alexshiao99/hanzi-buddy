@@ -2,25 +2,26 @@ import { build } from 'esbuild';
 import { execFileSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, rmSync, statSync } from 'node:fs';
 
-// Native selection watcher (used by hidden mode). Recompiled only when the C source changes.
-const NATIVE_SRC = 'native/selection-watcher.c';
-const NATIVE_BIN = 'bin/selection-watcher';
-if (!existsSync(NATIVE_BIN) || statSync(NATIVE_SRC).mtimeMs > statSync(NATIVE_BIN).mtimeMs) {
+// Native helpers. Recompiled only when their source changes.
+const NATIVE = [
+  { src: 'native/selection-watcher.c', bin: 'bin/selection-watcher', flags: ['-framework', 'ApplicationServices'] },
+  { src: 'native/clipboard-grab.m', bin: 'bin/clipboard-grab', flags: ['-fobjc-arc', '-framework', 'AppKit', '-framework', 'ApplicationServices'] },
+];
+for (const { src, bin, flags } of NATIVE) {
+  if (existsSync(bin) && statSync(src).mtimeMs <= statSync(bin).mtimeMs) continue;
   mkdirSync('bin', { recursive: true });
   try {
-    execFileSync('clang', ['-O2', '-Wall', '-framework', 'ApplicationServices', NATIVE_SRC, '-o', NATIVE_BIN], {
-      stdio: 'inherit',
-    });
-    console.log(`compiled ${NATIVE_BIN}`);
+    execFileSync('clang', ['-O2', '-Wall', ...flags, src, '-o', bin], { stdio: 'inherit' });
+    console.log(`compiled ${bin}`);
   } catch {
-    console.warn('⚠ could not compile the selection watcher (needs Xcode Command Line Tools); hidden mode will fall back to ⌘C');
+    console.warn(`⚠ could not compile ${bin} (needs Xcode Command Line Tools); the hotkey won't be able to read selections`);
   }
 }
 
 rmSync('dist', { recursive: true, force: true });
 mkdirSync('dist/renderer', { recursive: true });
 
-const node = { bundle: true, platform: 'node', target: 'node20', format: 'cjs', external: ['electron'], sourcemap: true };
+const node = { bundle: true, platform: 'node', target: 'node24', format: 'cjs', external: ['electron'], sourcemap: true };
 
 await Promise.all([
   build({ ...node, entryPoints: ['src/main/main.ts'], outfile: 'dist/main.js' }),
@@ -29,7 +30,7 @@ await Promise.all([
   build({
     bundle: true,
     platform: 'browser',
-    target: 'chrome120',
+    target: 'chrome156',
     format: 'iife',
     sourcemap: true,
     entryPoints: ['src/renderer/app.ts'],

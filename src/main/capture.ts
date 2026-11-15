@@ -1,24 +1,35 @@
 import { execFile } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { clipboard, systemPreferences } from 'electron';
 import { hasHan } from './lookup';
 
 const MAX_LEN = 300;
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** Markers password managers and similar apps put on the clipboard (see nspasteboard.org). */
+const PRIVATE_FORMATS = ['org.nspasteboard.ConcealedType', 'org.nspasteboard.TransientType'];
 
-const isLookupCandidate = (text: string) => text.trim().length > 0 && text.length <= MAX_LEN && hasHan(text);
+const isLookupCandidate = (text: string) => text.length > 0 && text.length <= MAX_LEN && hasHan(text);
+
+async function isPrivateClipboard(): Promise<boolean> {
+  const found = await Promise.all(
+    PRIVATE_FORMATS.map((format) => clipboard.has(`electron application/osclipboard;format="${format}"`)),
+  );
+  return found.includes(true);
+}
 
 /** Polls the clipboard and reports newly copied text that contains Chinese characters. */
 export class ClipboardWatcher {
-  private last = clipboard.readText();
+  /** null until the next poll records what's there, so existing clipboard contents never fire. */
+  private last: string | null = null;
   private timer: NodeJS.Timeout | null = null;
   private paused = false;
+  private polling = false;
 
   constructor(private readonly onText: (text: string) => void) {}
 
   start(): void {
     if (this.timer) return;
-    this.last = clipboard.readText(); // don't fire for whatever was already on the clipboard
-    this.timer = setInterval(() => this.tick(), 500);
+    this.last = null;
+    this.timer = setInterval(() => void this.tick(), 500);
   }
 
   stop(): void {
@@ -33,15 +44,25 @@ export class ClipboardWatcher {
 
   setPaused(paused: boolean): void {
     this.paused = paused;
-    if (!paused) this.last = clipboard.readText();
+    if (!paused) this.last = null;
   }
 
-  private tick(): void {
-    if (this.paused) return;
-    const text = clipboard.readText();
-    if (text === this.last) return;
-    this.last = text;
-    if (isLookupCandidate(text)) this.onText(text.trim());
+  private async tick(): Promise<void> {
+    if (this.paused || this.polling) return;
+    this.polling = true;
+    try {
+      const text = await clipboard.readText();
+      if (this.paused || text === this.last) return; // paused during the read: the result may be stale
+      const isFirstRead = this.last === null;
+      this.last = text;
+      if (isFirstRead) return;
+      const trimmed = text.trim();
+      if (isLookupCandidate(trimmed) && !(await isPrivateClipboard())) this.onText(trimmed);
+    } catch {
+      // a failed read is retried on the next poll
+    } finally {
+      this.polling = false;
+    }
   }
 }
 
@@ -49,37 +70,25 @@ export function hasAccessibility(prompt: boolean): boolean {
   return systemPreferences.isTrustedAccessibilityClient(prompt);
 }
 
-function pressCopy(): Promise<void> {
+export type GrabResult =
+  | { status: 'text'; text: string }
+  | { status: 'none' | 'too-long' | 'helper-missing' };
+
+function runHelper(binPath: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile(
-      'osascript',
-      ['-e', 'tell application "System Events" to keystroke "c" using {command down}'],
-      (err) => (err ? reject(err) : resolve()),
-    );
+    execFile(binPath, { timeout: 5000, maxBuffer: 1024 * 1024 }, (err, stdout) => (err ? reject(err) : resolve(stdout)));
   });
 }
 
-/**
- * Copies the current selection in the frontmost app by sending Cmd+C, reads it, then restores the
- * previous clipboard text. Returns null if nothing Chinese was selected.
- */
-export async function grabSelection(watcher: ClipboardWatcher): Promise<string | null> {
+/** Copies the selection in the frontmost app through the native helper, which restores the clipboard. */
+export async function grabSelection(binPath: string, watcher: ClipboardWatcher): Promise<GrabResult> {
+  if (!existsSync(binPath)) return { status: 'helper-missing' };
   watcher.setPaused(true);
-  const previous = clipboard.readText();
   try {
-    // Give the user a moment to release the hotkey's modifiers so they don't turn Cmd+C into Cmd+Shift+C.
-    await sleep(180);
-    clipboard.clear();
-    await pressCopy();
-    let text = '';
-    for (let i = 0; i < 10 && !text; i++) {
-      await sleep(40);
-      text = clipboard.readText();
-    }
-    return isLookupCandidate(text) ? text.trim() : null;
+    const text = (await runHelper(binPath)).trim();
+    if (!hasHan(text)) return { status: 'none' };
+    return isLookupCandidate(text) ? { status: 'text', text } : { status: 'too-long' };
   } finally {
-    if (previous) clipboard.writeText(previous);
-    watcher.markSeen(previous);
     watcher.setPaused(false);
   }
 }

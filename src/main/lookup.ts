@@ -37,7 +37,9 @@ const isSecondary =(e: DictEntry) =>
 export class Dictionary {
   private readonly map = new Map<string, DictEntry[]>();
 
-  constructor(file: string) {
+  /** With no file the dictionary is empty: everything still works, with no word meanings. */
+  constructor(file?: string) {
+    if (!file) return;
     const re = /^(\S+) (\S+) \[([^\]]*)\] \/(.*)\/\s*$/;
     for (const line of readFileSync(file, 'utf8').split('\n')) {
       if (!line || line.startsWith('#')) continue;
@@ -72,28 +74,43 @@ export class Dictionary {
     return defs.slice(0, 8);
   }
 
-  /** Greedy longest-match segmentation. Returns [start, end) ranges over `chars`. */
+  /** Splits text into runs of Han and non-Han characters. Returns [start, end) ranges over `chars`. */
   segment(chars: string[]): Array<[number, number]> {
     const out: Array<[number, number]> = [];
     let i = 0;
     while (i < chars.length) {
-      if (!HAN.test(chars[i])) {
-        let j = i;
-        while (j < chars.length && !HAN.test(chars[j])) j++;
-        out.push([i, j]);
-        i = j;
-        continue;
-      }
-      let len = 1;
-      for (let l = Math.min(MAX_WORD_LEN, chars.length - i); l > 1; l--) {
-        if (this.has(chars.slice(i, i + l).join(''))) {
-          len = l;
-          break;
+      const isHan = HAN.test(chars[i]);
+      let j = i + 1;
+      while (j < chars.length && HAN.test(chars[j]) === isHan) j++;
+      if (isHan) out.push(...this.segmentHan(chars, i, j));
+      else out.push([i, j]);
+      i = j;
+    }
+    return out;
+  }
+
+  /**
+   * Picks the split with the fewest words, then the most even word lengths (lowest sum of squares).
+   * Greedy matching reads 研究生命 as 研究生 + 命; this reads it as 研究 + 生命. Remaining ties go to
+   * the longer first word.
+   */
+  private segmentHan(chars: string[], start: number, end: number): Array<[number, number]> {
+    const best: Array<{ words: number; squares: number; next: number }> = [];
+    best[end] = { words: 0, squares: 0, next: end };
+    for (let i = end - 1; i >= start; i--) {
+      for (let len = Math.min(MAX_WORD_LEN, end - i); len >= 1; len--) {
+        if (len > 1 && !this.has(chars.slice(i, i + len).join(''))) continue;
+        const rest = best[i + len];
+        const words = rest.words + 1;
+        const squares = rest.squares + len * len;
+        const current = best[i];
+        if (!current || words < current.words || (words === current.words && squares < current.squares)) {
+          best[i] = { words, squares, next: i + len };
         }
       }
-      out.push([i, i + len]);
-      i += len;
     }
+    const out: Array<[number, number]> = [];
+    for (let i = start; i < end; i = best[i].next) out.push([i, best[i].next]);
     return out;
   }
 
@@ -102,7 +119,8 @@ export class Dictionary {
     const chars = Array.from(text);
     // Run pinyin over the whole phrase so polyphonic characters get context (银行 háng vs 行走 xíng).
     const marked = pinyin(text, { type: 'all' });
-    const numbered = pinyin(text, { type: 'array', toneType: 'num' });
+    // Dictionary readings use base tones (不是 bu4 shi4), so match against those rather than the spoken bú shì.
+    const numbered = pinyin(text, { type: 'array', toneType: 'num', toneSandhi: false });
 
     const charInfos: CharInfo[] = chars.map((char, i) => {
       const isHan = HAN.test(char);
@@ -122,7 +140,8 @@ export class Dictionary {
         hanzi,
         isHan,
         chars: wc,
-        pinyin: wc.map((c) => c.pinyin).join(''),
+        // A character pinyin-pro doesn't know (𠮷) stays visible instead of vanishing from the line.
+        pinyin: wc.map((c) => c.pinyin || c.char).join(''),
         defs: isHan ? this.definitions(hanzi, numbered.slice(start, end).join(' ')) : [],
       };
     });

@@ -1,4 +1,6 @@
-import type { HanziApi, LookupResult, SavedItem, Settings, WordInfo } from '../shared/types';
+import { hotkeyLabel } from '../shared/hotkey';
+import { groupSaved, plain } from '../shared/saved-order';
+import type { HanziApi, LookupResult, SavedItem, SavedSort, Settings, WordInfo } from '../shared/types';
 
 declare global {
   interface Window {
@@ -26,9 +28,6 @@ function h<K extends keyof HTMLElementTagNameMap>(
   return node;
 }
 
-/** Strip tone marks so "xihuan" matches "xǐhuan" in search. */
-const plain = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
-
 let toastTimer: number | undefined;
 function toast(message: string): void {
   const t = $('toast');
@@ -36,6 +35,35 @@ function toast(message: string): void {
   t.hidden = false;
   clearTimeout(toastTimer);
   toastTimer = window.setTimeout(() => (t.hidden = true), 4000);
+}
+
+/**
+ * Two-step confirmation for destructive buttons. The first click arms the button and returns false;
+ * a second click within 3s returns true. `restore` puts the button back if it times out.
+ */
+const armedButtons = new WeakMap<HTMLElement, number>();
+function disarm(button: HTMLElement): void {
+  clearTimeout(armedButtons.get(button));
+  armedButtons.delete(button);
+  button.classList.remove('confirm');
+}
+
+function confirmClick(button: HTMLElement, restore: () => void, label = 'Delete?'): boolean {
+  if (armedButtons.has(button)) {
+    disarm(button);
+    return true;
+  }
+  button.classList.add('confirm');
+  button.textContent = label;
+  armedButtons.set(
+    button,
+    window.setTimeout(() => {
+      armedButtons.delete(button);
+      button.classList.remove('confirm');
+      restore();
+    }, 3000),
+  );
+  return false;
 }
 
 // ---- state --------------------------------------------------------------------------------------
@@ -65,8 +93,17 @@ function switchView(view: View): void {
   if (view === 'review') startReview();
 }
 
+const canTranslate = (s: Settings | undefined) => !!s && s.onlineTranslation && s.translationNoticeSeen;
+
 function applySettings(s: Settings): void {
+  const couldTranslate = canTranslate(settings);
+  const previousSort = settings?.savedSort;
   settings = s;
+  $<HTMLSelectElement>('saved-sort').value = s.savedSort;
+  if (s.savedSort !== previousSort && !$('view-saved').hidden) renderSaved();
+  $('translation-notice').hidden = s.translationNoticeSeen;
+  const label = hotkeyLabel(s.hotkey);
+  $('hotkey-hint').replaceChildren(...Array.from(label, (key) => h('kbd', { text: key })));
   document.body.classList.toggle('tones', s.toneColors);
   const watch = $('btn-watch');
   watch.classList.toggle('on', s.watchClipboard);
@@ -82,7 +119,12 @@ function applySettings(s: Settings): void {
   mode.textContent = popup ? '▣' : '◌';
   mode.title = popup
     ? 'Switch back to the floating card'
-    : 'Hidden mode: no window. Highlight Chinese anywhere and press ⌘⇧Y for a popup.';
+    : `Hidden mode: no window. Highlight Chinese anywhere and press ${label} for a popup.`;
+
+  if (current) {
+    if (!couldTranslate && canTranslate(s)) void runTranslation(current.result, lookupSeq);
+    else renderResult(); // the "translation off" message depends on these settings
+  }
 }
 
 // ---- speech -------------------------------------------------------------------------------------
@@ -100,13 +142,30 @@ async function showLookup(text: string): Promise<void> {
   renderResult();
   $('words').toggleAttribute('open', result.words.filter((w) => w.isHan).length <= 3);
   document.querySelector('main')?.scrollTo(0, 0);
+  await runTranslation(result, seq);
+}
 
+async function runTranslation(result: LookupResult, seq: number): Promise<void> {
+  if (current && seq === lookupSeq) {
+    current.translating = true;
+    renderResult();
+  }
   const translation = await api.translate(result.text);
+  // Runs even if another lookup has started, since this phrase may have been saved in the meantime.
+  if (translation) await replaceSavedGloss(result, translation);
   if (seq !== lookupSeq || !current) return;
   current.translation = translation;
   current.translating = false;
   if (!translation) $('words').setAttribute('open', '');
   renderResult();
+}
+
+/** Upgrades a saved phrase that only has the dictionary fallback once its real translation is known. */
+async function replaceSavedGloss(result: LookupResult, translation: string): Promise<void> {
+  const item = savedByHanzi(result.text);
+  if (!item || item.translation === translation || item.translation !== dictionaryGloss(result)) return;
+  await api.updateSaved(item.id, { translation });
+  await refreshSaved();
 }
 
 function rubyFor(word: WordInfo): HTMLElement {
@@ -128,14 +187,11 @@ function rubyFor(word: WordInfo): HTMLElement {
   return span;
 }
 
-function phraseMeaning(): string {
-  if (!current) return '';
-  if (current.translation) return current.translation;
-  return current.result.words
+const dictionaryGloss = (result: LookupResult) =>
+  result.words
     .filter((w) => w.isHan && w.defs.length)
     .map((w) => w.defs[0])
     .join(' · ');
-}
 
 function renderResult(): void {
   $('empty').hidden = !!current;
@@ -157,12 +213,15 @@ function renderResult(): void {
   } else if (translation) {
     tr.textContent = translation;
   } else {
-    tr.textContent = 'Phrase translation unavailable (offline?). Word meanings are below.';
+    tr.textContent = canTranslate(settings)
+      ? 'Phrase translation unavailable (offline?). Word meanings are below.'
+      : 'Online translation is off. Word meanings are below.';
     tr.classList.add('missing');
   }
 
   const isSaved = !!savedByHanzi(result.text);
   const saveBtn = $('btn-save');
+  disarm(saveBtn);
   saveBtn.textContent = isSaved ? '★ Saved' : '☆ Save';
   saveBtn.classList.toggle('saved', isSaved);
 
@@ -174,6 +233,14 @@ function renderResult(): void {
 function wordRow(word: WordInfo): HTMLLIElement {
   const saved = savedByHanzi(word.hanzi);
   const meaning = word.defs.slice(0, 4).join('; ');
+  const starText = saved ? '★' : '☆';
+  const star: HTMLButtonElement = h('button', {
+    text: starText,
+    className: saved ? 'saved' : '',
+    title: saved ? 'Remove from saved' : 'Save this word',
+    onClick: () =>
+      void toggleSave(star, () => (star.textContent = starText), word.hanzi, word.pinyin, word.defs.slice(0, 3).join('; ')),
+  });
   return h(
     'li',
     {},
@@ -188,19 +255,16 @@ function wordRow(word: WordInfo): HTMLLIElement {
       'div',
       { className: 'entry-actions' },
       h('button', { text: '🔊', title: 'Listen', onClick: () => say(word.hanzi) }),
-      h('button', {
-        text: saved ? '★' : '☆',
-        className: saved ? 'saved' : '',
-        title: saved ? 'Remove from saved' : 'Save this word',
-        onClick: () => void toggleSave(word.hanzi, word.pinyin, word.defs.slice(0, 3).join('; ')),
-      }),
+      star,
     ),
   );
 }
 
-async function toggleSave(hanzi: string, pinyin: string, translation: string): Promise<void> {
+/** Saving is one click. Removing also loses the note and review history, so it asks first. */
+async function toggleSave(button: HTMLElement, restore: () => void, hanzi: string, pinyin: string, translation: string): Promise<void> {
   const existing = savedByHanzi(hanzi);
   if (existing) {
+    if (!confirmClick(button, restore, 'Remove?')) return;
     await api.removeSaved(existing.id);
     toast(`Removed ${hanzi}`);
   } else {
@@ -218,24 +282,19 @@ function renderSaved(): void {
     (i) => !q || [i.hanzi, i.pinyin, i.translation, i.note].some((f) => plain(f).includes(q)),
   );
   $('saved-empty').hidden = savedItems.length > 0;
-  $('saved-list').replaceChildren(...items.map(savedRow));
+  $('saved-list').replaceChildren(
+    ...groupSaved(items, settings.savedSort, Date.now()).flatMap((group) => [
+      h('li', { className: 'saved-group', text: group.label }),
+      ...group.items.map(savedRow),
+    ]),
+  );
 }
 
 function savedRow(item: SavedItem): HTMLLIElement {
   const note = h('div', { className: 'entry-note', text: item.note });
   const del = h('button', { text: '🗑', title: 'Delete' });
-  let confirmTimer: number | undefined;
   del.addEventListener('click', async () => {
-    if (!del.classList.contains('confirm')) {
-      del.classList.add('confirm');
-      del.textContent = 'Delete?';
-      confirmTimer = window.setTimeout(() => {
-        del.classList.remove('confirm');
-        del.textContent = '🗑';
-      }, 3000);
-      return;
-    }
-    clearTimeout(confirmTimer);
+    if (!confirmClick(del, () => (del.textContent = '🗑'))) return;
     await api.removeSaved(item.id);
     await refreshSaved();
   });
@@ -250,6 +309,9 @@ function savedRow(item: SavedItem): HTMLLIElement {
       h('div', { className: 'entry-pinyin', text: item.pinyin }),
       h('div', { className: 'entry-defs', text: item.translation }),
       note,
+      ...(settings.savedSort === 'practice' && item.again > 0
+        ? [h('div', { className: 'entry-missed', text: `missed ${item.again}×` })]
+        : []),
     ),
     h(
       'div',
@@ -330,6 +392,7 @@ function reveal(): void {
 
 async function grade(gotIt: boolean): Promise<void> {
   if (!reviewItem || !revealed) return;
+  revealed = false; // a second key press while this one is saving must not grade again
   const i = reviewItem;
   await api.updateSaved(i.id, {
     reviewCount: i.reviewCount + 1,
@@ -363,9 +426,17 @@ function wire(): void {
 
   $('btn-speak').addEventListener('click', () => current && say(current.result.text));
   $('btn-slow').addEventListener('click', () => current && say(current.result.text, true));
-  $('btn-save').addEventListener('click', () => {
-    if (current) void toggleSave(current.result.text, current.result.pinyin, phraseMeaning());
+  $('btn-save').addEventListener('click', async () => {
+    if (!current) return;
+    const { result, translation } = current;
+    await toggleSave($('btn-save'), renderResult, result.text, result.pinyin, translation ?? dictionaryGloss(result));
+    // The translation may have arrived while the save was on its way to the main process.
+    if (current?.result === result && current.translation) await replaceSavedGloss(result, current.translation);
   });
+  const answerNotice = (onlineTranslation: boolean) =>
+    void api.setSettings({ onlineTranslation, translationNoticeSeen: true });
+  $('btn-allow-translation').addEventListener('click', () => answerNotice(true));
+  $('btn-deny-translation').addEventListener('click', () => answerNotice(false));
   $('btn-copy-pinyin').addEventListener('click', async () => {
     if (!current) return;
     await api.copyText(current.result.pinyin);
@@ -373,6 +444,8 @@ function wire(): void {
   });
 
   $('search').addEventListener('input', renderSaved);
+  const savedSort = $<HTMLSelectElement>('saved-sort');
+  savedSort.addEventListener('change', () => void api.setSettings({ savedSort: savedSort.value as SavedSort }));
   $('btn-export').addEventListener('click', async () => {
     const file = await api.exportCsv();
     if (file) toast(`Exported to ${file}`);

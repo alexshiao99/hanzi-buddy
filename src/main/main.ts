@@ -15,6 +15,7 @@ import {
   Tray,
 } from 'electron';
 import type { AppMode, IncomingSource, SavedItem, Settings } from '../shared/types';
+import { HOTKEY_CHOICES, hotkeyLabel as formatHotkey } from '../shared/hotkey';
 import { ClipboardWatcher, grabSelection, hasAccessibility } from './capture';
 import { Dictionary, translate } from './lookup';
 import { SelectionWatcher } from './selection';
@@ -32,10 +33,23 @@ let watcher: ClipboardWatcher;
 let selection: SelectionWatcher;
 let dialogOpen = false;
 
-const getDict = () => (dict ??= new Dictionary(path.join(app.getAppPath(), 'data', 'cedict.txt')));
+/** bin/ and data/ sit in the project during development and in Contents/Resources once packaged. */
+const resourcePath = (...parts: string[]) =>
+  path.join(app.isPackaged ? process.resourcesPath : app.getAppPath(), ...parts);
+
+/** Without the dictionary file, lookups still give pinyin and translation; word meanings are just empty. */
+function getDict(): Dictionary {
+  if (dict) return dict;
+  try {
+    dict = new Dictionary(resourcePath('data', 'cedict.txt'));
+  } catch {
+    dict = new Dictionary();
+    notice('The dictionary file is missing, so word meanings are unavailable. Run npm install to download it.', 'dictionary missing');
+  }
+  return dict;
+}
 const isHidden = () => settings.get().mode === 'hidden';
-const hotkeyLabel = () =>
-  settings.get().hotkey.replace('CommandOrControl', '⌘').replace('Shift', '⇧').replace('Alt', '⌥').replace(/\+/g, '');
+const hotkeyLabel = () => formatHotkey(settings.get().hotkey);
 
 // ---- window placement ---------------------------------------------------------------------------
 // One window serves both modes. Placement is kept here so another layout (e.g. a bottom-of-screen
@@ -162,6 +176,7 @@ function applyMode(mode: AppMode): void {
     hidePopup();
   } else {
     selection.stop();
+    if (app.isHidden()) app.show(); // the popup hides the whole app, and a hidden app can't show windows
     applyAlwaysOnTop(win, settings.get().alwaysOnTop);
     win.setBounds(cardBounds());
     win.showInactive();
@@ -171,14 +186,24 @@ function applyMode(mode: AppMode): void {
 
 // ---- incoming text & notices ----------------------------------------------------------------------
 
+/** Messages sent before the page has loaded would be lost, so those wait for it. */
+function sendToRenderer(channel: string, ...args: unknown[]): void {
+  if (!win) return;
+  const { webContents } = win;
+  if (webContents.isLoading()) webContents.once('did-finish-load', () => webContents.send(channel, ...args));
+  else webContents.send(channel, ...args);
+}
+
 function sendIncoming(text: string, source: IncomingSource): void {
   if (isHidden()) {
     if (source === 'clipboard') return; // hidden mode only reacts to the hotkey
     showPopup();
   } else {
+    // A closed card stays closed: copying text doesn't bring it back, only the hotkey or the 汉 menu does.
+    if (source === 'clipboard' && !win?.isVisible()) return;
     showCard();
   }
-  win?.webContents.send('incoming-text', text, source);
+  sendToRenderer('incoming-text', text, source);
   snapshot();
 }
 
@@ -203,11 +228,17 @@ function notice(message: string, short = message): void {
     return;
   }
   showCard();
-  win?.webContents.send('notice', message);
+  sendToRenderer('notice', message);
 }
 
 function updateSettings(patch: Partial<Settings>): Settings {
-  const prevMode = settings.get().mode;
+  const prev = settings.get();
+  const prevMode = prev.mode;
+  if (patch.hotkey && patch.hotkey !== prev.hotkey && !registerHotkey(patch.hotkey)) {
+    registerHotkey(prev.hotkey);
+    notice(`${formatHotkey(patch.hotkey)} is used by another app. Keeping ${formatHotkey(prev.hotkey)}.`, 'hotkey unavailable');
+    patch = { ...patch, hotkey: prev.hotkey };
+  }
   const next = settings.set(patch);
   if (patch.watchClipboard !== undefined) {
     if (next.watchClipboard) watcher.start();
@@ -215,7 +246,7 @@ function updateSettings(patch: Partial<Settings>): Settings {
   }
   if (patch.alwaysOnTop !== undefined && win && !isHidden()) applyAlwaysOnTop(win, next.alwaysOnTop);
   if (next.mode !== prevMode) applyMode(next.mode);
-  win?.webContents.send('settings', next);
+  sendToRenderer('settings', next);
   rebuildTrayMenu();
   return next;
 }
@@ -241,8 +272,15 @@ async function onHotkey(): Promise<void> {
   grabbing = true;
   try {
     // Hidden mode already knows the highlighted text; otherwise (or in apps that don't expose it) copy it.
-    const text = (isHidden() && selection.current) || (await grabSelection(watcher));
-    if (text) sendIncoming(text, 'hotkey');
+    const highlighted = isHidden() && selection.current;
+    if (highlighted) {
+      sendIncoming(highlighted, 'hotkey');
+      return;
+    }
+    const grabbed = await grabSelection(resourcePath('bin', 'clipboard-grab'), watcher);
+    if (grabbed.status === 'text') sendIncoming(grabbed.text, 'hotkey');
+    else if (grabbed.status === 'too-long') notice('That selection is too long. Select 300 characters or fewer.', 'selection too long');
+    else if (grabbed.status === 'helper-missing') notice('The selection helper is missing. Install Xcode Command Line Tools and rebuild.', 'helper missing');
     else notice('No Chinese text selected.', 'no Chinese selected');
   } catch {
     notice('Could not copy the selection. Check the Accessibility permission.', 'could not read selection');
@@ -251,11 +289,12 @@ async function onHotkey(): Promise<void> {
   }
 }
 
-function registerHotkey(): void {
-  const { hotkey } = settings.get();
+function registerHotkey(hotkey: string): boolean {
   globalShortcut.unregisterAll();
-  if (!globalShortcut.register(hotkey, () => void onHotkey())) {
-    notice(`Hotkey ${hotkey} is used by another app.`, 'hotkey unavailable');
+  try {
+    return globalShortcut.register(hotkey, () => void onHotkey());
+  } catch {
+    return false; // not a valid accelerator (hand-edited settings)
   }
 }
 
@@ -287,8 +326,23 @@ function rebuildTrayMenu(): void {
       { label: 'Watch clipboard', type: 'checkbox', checked: s.watchClipboard, enabled: !hidden, click: (i) => updateSettings({ watchClipboard: i.checked }) },
       { label: 'Always on top', type: 'checkbox', checked: s.alwaysOnTop, enabled: !hidden, click: (i) => updateSettings({ alwaysOnTop: i.checked }) },
       { label: 'Tone colors', type: 'checkbox', checked: s.toneColors, click: (i) => updateSettings({ toneColors: i.checked }) },
+      {
+        label: 'Online translation',
+        sublabel: 'Sends looked-up text to Google Translate and MyMemory',
+        type: 'checkbox',
+        checked: s.onlineTranslation && s.translationNoticeSeen,
+        click: (i) => updateSettings({ onlineTranslation: i.checked, translationNoticeSeen: true }),
+      },
       { type: 'separator' },
-      { label: `Look up highlighted text: ${hotkeyLabel()}`, enabled: false },
+      {
+        label: 'Hotkey',
+        submenu: HOTKEY_CHOICES.map((hotkey) => ({
+          label: formatHotkey(hotkey),
+          type: 'radio' as const,
+          checked: hotkey === s.hotkey,
+          click: () => updateSettings({ hotkey }),
+        })),
+      },
       { label: 'Open Accessibility settings…', click: () => void shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility') },
       { type: 'separator' },
       { label: 'Quit Hanzi Buddy', click: () => app.quit() },
@@ -315,11 +369,15 @@ function createTray(): void {
 function registerIpc(): void {
   ipcMain.handle('lookup', (_e, text: string) => getDict().lookup(text));
   // net.fetch uses Chromium's network stack.
-  ipcMain.handle('translate', (_e, text: string) => translate(text, (url, init) => net.fetch(url, init)));
+  ipcMain.handle('translate', (_e, text: string) => {
+    const { onlineTranslation, translationNoticeSeen } = settings.get();
+    if (!onlineTranslation || !translationNoticeSeen) return null;
+    return translate(text, (url, init) => net.fetch(url, init));
+  });
   ipcMain.handle('speak', (_e, text: string, slow: boolean) => speak(text, slow));
   ipcMain.handle('copy-text', (_e, text: string) => {
     watcher.markSeen(text);
-    clipboard.writeText(text);
+    return clipboard.writeText(text);
   });
 
   ipcMain.handle('saved:list', () => saved.list());
@@ -372,14 +430,17 @@ void app.whenReady().then(() => {
   settings = new SettingsStore(dir);
   saved = new SavedStore(dir);
   watcher = new ClipboardWatcher((text) => sendIncoming(text, 'clipboard'));
-  selection = new SelectionWatcher(path.join(app.getAppPath(), 'bin', 'selection-watcher'), updateTrayTitle);
+  selection = new SelectionWatcher(resourcePath('bin', 'selection-watcher'), updateTrayTitle);
 
   registerIpc();
   win = createWindow();
   win.on('show', rebuildTrayMenu);
   win.on('hide', rebuildTrayMenu);
   createTray();
-  registerHotkey();
+  const { hotkey } = settings.get();
+  if (!registerHotkey(hotkey)) {
+    notice(`${formatHotkey(hotkey)} is used by another app. Pick another hotkey in the 汉 menu.`, 'hotkey unavailable');
+  }
   if (settings.get().watchClipboard) watcher.start();
   if (isHidden()) selection.start();
   setTimeout(getDict, 50); // warm the dictionary (~200ms) after the window is up

@@ -6,7 +6,9 @@
     "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit",
     "start": "node scripts/build.mjs && electron .",
+    "test": "node scripts/test.mjs",
     "test:lookup": "node scripts/build.mjs && node dist/test-lookup.js",
+    "dist": "node scripts/build.mjs && electron-builder --mac",
     "postinstall": "node scripts/fetch-dict.mjs"
   },
   "license": "MIT",
@@ -15,11 +17,29 @@
   },
   "description": "Floating Chinese lookup: pinyin, translation, read-aloud, saved word review",
   "devDependencies": {
-    "@types/node": "^18.19.130",
-    "electron": "^33.4.11",
+    "@types/node": "^26.6.6",
+    "electron": "^45.2.2",
+    "electron-builder": "^26.18.0",
     "esbuild": "^0.28.2",
     "typescript": "^7.0.2"
   },
   "productName": "Hanzi Buddy",
-  "private": true
+  "private": true,
+  "build": {
+    "appId": "com.hanzibuddy.app",
+    "electronDist": "node_modules/electron/dist",
+    "directories": { "output": "release" },
+    "files": ["dist/**/*", "!dist/test-lookup*", "!dist/**/*.map", "!node_modules/**/*"],
+    "extraResources": [
+      { "from": "bin", "to": "bin" },
+      { "from": "data", "to": "data" }
+    ],
+    "mac": {
+      "category": "public.app-category.education",
+      "target": ["dmg"],
+      "identity": "-",
+      "hardenedRuntime": false,
+      "extendInfo": { "LSUIElement": true }
+    }
+  }
 }

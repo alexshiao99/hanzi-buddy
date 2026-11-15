@@ -19,15 +19,26 @@
           <button id="btn-mode" class="icon" title="Hidden mode">◌</button>
           <button id="btn-watch" class="icon" title="Watching clipboard (click to pause)">●</button>
           <button id="btn-pin" class="icon" title="Always on top">⇡</button>
-          <button id="btn-close" class="icon" title="Hide (reopen from 汉 in the menu bar)">✕</button>
+          <button id="btn-close" class="icon" title="Close (reopen with the hotkey or from 汉 in the menu bar)">✕</button>
         </div>
       </header>
+
+      <aside id="translation-notice" class="notice" hidden>
+        <p>
+          Phrase translation sends the text you look up, including Chinese you copy while clipboard watching is on, to
+          Google Translate and MyMemory. Pinyin, word meanings and speech stay on your Mac.
+        </p>
+        <div class="actions">
+          <button id="btn-allow-translation">Use online translation</button>
+          <button id="btn-deny-translation">Stay offline</button>
+        </div>
+      </aside>
 
       <main>
         <section id="view-lookup" class="view">
           <div id="empty" class="hint">
             <div class="hint-big">复制 · 学习</div>
-            <p>Copy any Chinese text, or highlight it and press <kbd>⌘</kbd><kbd>⇧</kbd><kbd>Y</kbd>.</p>
+            <p>Copy any Chinese text, or highlight it and press <span id="hotkey-hint"></span>.</p>
           </div>
           <div id="result" hidden>
             <div id="hanzi" class="hanzi"></div>
@@ -48,7 +59,12 @@
 
         <section id="view-saved" class="view" hidden>
           <div class="toolbar">
-            <input id="search" type="search" placeholder="Search hanzi, pinyin, meaning…" />
+            <input id="search" type="search" placeholder="Search saved…" />
+            <select id="saved-sort" title="Sort saved items" aria-label="Sort saved items">
+              <option value="recent">Recent</option>
+              <option value="pinyin">Pinyin A–Z</option>
+              <option value="practice">Needs practice</option>
+            </select>
             <button id="btn-export" title="Export as CSV (Anki-importable)">Export</button>
           </div>
           <ul id="saved-list" class="saved-list"></ul>

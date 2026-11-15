@@ -24,7 +24,8 @@ function pickVoice(): string | null {
 export function speak(text: string, slow: boolean): Promise<void> {
   stopSpeaking();
   const v = pickVoice();
-  const args = [...(v ? ['-v', v] : []), '-r', slow ? '110' : '180', text];
+  // `--` keeps text that starts with a dash from being read as an option (`say -o` writes files).
+  const args = [...(v ? ['-v', v] : []), '-r', slow ? '110' : '180', '--', text];
   return new Promise((resolve) => {
     const proc = spawn('say', args, { stdio: 'ignore' });
     current = proc;
