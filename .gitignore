@@ -1,0 +1,7 @@
+node_modules/
+dist/
+data/cedict.txt
+bin/
+dist-test/
+release/
+.claude/
