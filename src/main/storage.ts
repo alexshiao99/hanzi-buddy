@@ -42,6 +42,7 @@ export const DEFAULT_SETTINGS: Settings = {
   onlineTranslation: true,
   translationNoticeSeen: false,
   savedSort: 'recent',
+  translateHotkey: 'DoubleControl',
 };
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -60,6 +61,7 @@ function sanitizeSettings(raw: Record<string, unknown>): Settings {
   if (raw.mode === 'card' || raw.mode === 'hidden') out.mode = raw.mode;
   if (typeof raw.onlineTranslation === 'boolean') out.onlineTranslation = raw.onlineTranslation;
   if (typeof raw.translationNoticeSeen === 'boolean') out.translationNoticeSeen = raw.translationNoticeSeen;
+  if (typeof raw.translateHotkey === 'string' && raw.translateHotkey) out.translateHotkey = raw.translateHotkey;
   if (raw.savedSort === 'recent' || raw.savedSort === 'pinyin' || raw.savedSort === 'practice') out.savedSort = raw.savedSort;
   return out;
 }

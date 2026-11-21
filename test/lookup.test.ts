@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { before, describe, it } from 'node:test';
-import { Dictionary, translate, type FetchLike } from '../src/main/lookup';
+import { Dictionary, normalizeGloss, numberedToMarks, translate, type FetchLike } from '../src/main/lookup';
 
 let dict: Dictionary;
 before(() => {
@@ -108,5 +108,64 @@ describe('translate', () => {
     await translate('测试五', fetchImpl);
     assert.equal(await translate('测试五', fetchImpl), 'cached');
     assert.equal(calls, 1);
+  });
+});
+
+describe('english search', () => {
+  const top = (q: string, n = 3) => dict.english(q).slice(0, n).map((m) => m.hanzi);
+
+  it('normalizes glosses', () => {
+    assert.equal(normalizeGloss('to eat'), 'eat');
+    assert.equal(normalizeGloss('Apple (fruit)'), 'apple');
+    assert.equal(normalizeGloss('  Thank  you! '), 'thank you');
+  });
+
+  it('converts dictionary readings to tone marks', () => {
+    assert.equal(numberedToMarks('xi3 huan5'), 'xǐhuan');
+    assert.equal(numberedToMarks('nu:3 er2'), 'nǚér');
+  });
+
+  it('finds everyday words near the top', () => {
+    assert.ok(top('eat').includes('吃'));
+    assert.ok(top('cat').includes('猫'));
+    assert.ok(top('water').includes('水'));
+    assert.ok(top('computer').includes('电脑'));
+    assert.deepEqual(top('to love', 1), top('love', 1));
+  });
+
+  it('puts the common noun before the proper noun', () => {
+    const [apple] = dict.english('apple');
+    assert.equal(apple.hanzi, '苹果');
+    assert.equal(apple.pinyin, 'píngguǒ');
+  });
+
+  it('returns nothing for unknown words, empty queries and long sentences', () => {
+    assert.deepEqual(dict.english('xyzzyq'), []);
+    assert.deepEqual(dict.english('   '), []);
+    assert.deepEqual(dict.english('I would like to order a coffee please'), []);
+  });
+});
+
+describe('translate english to chinese', () => {
+  it('asks for en → zh-CN and caches separately from zh → en', async () => {
+    const urls: string[] = [];
+    const fetchImpl: FetchLike = async (url) => {
+      urls.push(url);
+      return new Response(JSON.stringify([[['你好', 'hello']]]), { headers: { 'content-type': 'application/json' } });
+    };
+    assert.equal(await translate('hello', fetchImpl, 'en-zh'), '你好');
+    assert.ok(urls[0].includes('sl=en&tl=zh-CN'));
+    await translate('hello', fetchImpl, 'zh-en');
+    assert.equal(urls.length, 2);
+    assert.ok(urls[1].includes('sl=zh-CN&tl=en'));
+  });
+
+  it('falls back to MyMemory with the right language pair', async () => {
+    const fetchImpl: FetchLike = async (url) => {
+      if (url.includes('googleapis')) throw new Error('offline');
+      assert.ok(url.includes('langpair=en%7Czh-CN'));
+      return new Response(JSON.stringify({ responseStatus: 200, responseData: { translatedText: '猫' } }));
+    };
+    assert.equal(await translate('cat', fetchImpl, 'en-zh'), '猫');
   });
 });

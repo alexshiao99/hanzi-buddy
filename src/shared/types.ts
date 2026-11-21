@@ -24,6 +24,14 @@ export interface LookupResult {
   words: WordInfo[];
 }
 
+/** A Chinese word found by searching the dictionary's English meanings. */
+export interface EnglishMatch {
+  hanzi: string;
+  /** Dictionary reading with tone marks, e.g. "chī". */
+  pinyin: string;
+  defs: string[];
+}
+
 export interface SavedItem {
   id: string;
   hanzi: string;
@@ -60,6 +68,8 @@ export interface Settings {
   /** Nothing is sent online until the first-run notice has been answered. */
   translationNoticeSeen: boolean;
   savedSort: SavedSort;
+  /** Opens EN→中: "DoubleControl" (default), another "Double…" modifier, an accelerator, or "Off". */
+  translateHotkey: string;
 }
 
 export type AppMode = 'card' | 'hidden';
@@ -71,6 +81,10 @@ export type IncomingSource = 'clipboard' | 'hotkey';
 export interface HanziApi {
   lookup(text: string): Promise<LookupResult>;
   translate(text: string): Promise<string | null>;
+  /** English to Simplified Chinese, online. Null when offline or online translation is off. */
+  translateToChinese(text: string): Promise<string | null>;
+  /** Chinese words whose dictionary meaning matches the English, offline. */
+  searchEnglish(text: string): Promise<EnglishMatch[]>;
   speak(text: string, slow: boolean): Promise<void>;
   copyText(text: string): Promise<void>;
 
@@ -83,8 +97,14 @@ export interface HanziApi {
   getSettings(): Promise<Settings>;
   setSettings(patch: Partial<Settings>): Promise<Settings>;
   hideWindow(): Promise<void>;
+  /** Tells the main process which tab is showing, so the translate shortcut can toggle. */
+  setView(view: string): void;
+  /** Esc in an empty EN→中 box: put the window away and return to the previous app. */
+  dismissTranslate(): Promise<void>;
 
   onIncomingText(cb: (text: string, source: IncomingSource) => void): void;
   onNotice(cb: (message: string) => void): void;
   onSettings(cb: (settings: Settings) => void): void;
+  /** The translate shortcut was pressed: show EN→中 and focus its text box. */
+  onOpenTranslate(cb: () => void): void;
 }

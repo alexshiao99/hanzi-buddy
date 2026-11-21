@@ -5,6 +5,7 @@ import { cpSync, existsSync, mkdirSync, rmSync, statSync } from 'node:fs';
 // Native helpers. Recompiled only when their source changes.
 const NATIVE = [
   { src: 'native/selection-watcher.c', bin: 'bin/selection-watcher', flags: ['-framework', 'ApplicationServices'] },
+  { src: 'native/modifier-tap.c', bin: 'bin/modifier-tap', flags: ['-framework', 'ApplicationServices'] },
   { src: 'native/clipboard-grab.m', bin: 'bin/clipboard-grab', flags: ['-fobjc-arc', '-framework', 'AppKit', '-framework', 'ApplicationServices'] },
 ];
 for (const { src, bin, flags } of NATIVE) {

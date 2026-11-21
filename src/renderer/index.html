@@ -11,22 +11,35 @@
       <header class="drag">
         <span class="brand" title="Hanzi Buddy">汉</span>
         <nav class="tabs no-drag">
-          <button data-view="lookup" class="active">Lookup</button>
-          <button data-view="saved">Saved <span id="saved-count" class="badge"></span></button>
-          <button data-view="review">Review</button>
+          <button data-view="lookup" class="active" title="Lookup: pinyin and meanings for Chinese you copy or highlight" aria-label="Lookup">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5" /><path d="M10.5 10.5 14 14" /></svg>
+          </button>
+          <button data-view="translate" title="Translate English → Chinese" aria-label="Translate English to Chinese">
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M1.5 3.5h7M5 2v1.5M3.5 3.5c.3 2.6 2 4.6 4.5 5.5M7 3.5c-.6 3-2.4 5.3-5 6.5" />
+              <path d="M8.5 14.5 11.5 7l3 7.5M9.5 12h4" />
+            </svg>
+          </button>
+          <button data-view="saved" title="Saved words" aria-label="Saved words">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .7 4.3L8 11.6l-3.8 2 .7-4.3-3.1-3 4.3-.6z" /></svg>
+            <span id="saved-count" class="badge"></span>
+          </button>
+          <button data-view="review" title="Review: flashcards of your saved words" aria-label="Review">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="4.5" width="10" height="9" rx="1.5" /><path d="M4.5 2h8.5a1.5 1.5 0 0 1 1.5 1.5V10" /></svg>
+          </button>
         </nav>
         <div class="controls no-drag">
           <button id="btn-mode" class="icon" title="Hidden mode">◌</button>
           <button id="btn-watch" class="icon" title="Watching clipboard (click to pause)">●</button>
           <button id="btn-pin" class="icon" title="Always on top">⇡</button>
-          <button id="btn-close" class="icon" title="Close (reopen with the hotkey or from 汉 in the menu bar)">✕</button>
+          <button id="btn-close" class="icon" title="Close: switches to hidden mode">✕</button>
         </div>
       </header>
 
       <aside id="translation-notice" class="notice" hidden>
         <p>
-          Phrase translation sends the text you look up, including Chinese you copy while clipboard watching is on, to
-          Google Translate and MyMemory. Pinyin, word meanings and speech stay on your Mac.
+          Phrase translation sends the text you look up, including Chinese you copy while clipboard watching is on and
+          English you translate with EN→中, to Google Translate and MyMemory. Pinyin, word meanings and speech stay on your Mac.
         </p>
         <div class="actions">
           <button id="btn-allow-translation">Use online translation</button>
@@ -54,6 +67,32 @@
               <summary>Word by word</summary>
               <ul id="word-list" class="word-list"></ul>
             </details>
+          </div>
+        </section>
+
+        <section id="view-translate" class="view" hidden>
+          <form id="en-form" class="toolbar">
+            <input id="en-input" type="search" placeholder="Type English, e.g. happy or I want coffee" autocomplete="off" spellcheck="true" />
+            <button type="submit">Translate</button>
+          </form>
+          <div id="en-empty" class="hint">
+            <div class="hint-big">英 → 中</div>
+            <p>Type an English word or sentence and press Enter. Words also show matches from the offline dictionary as you type.</p>
+            <p id="en-hotkey-hint"></p>
+          </div>
+          <div id="en-result" class="en-result" hidden>
+            <div id="en-hanzi" class="hanzi" title="Open in Lookup for pinyin by character and word meanings"></div>
+            <div id="en-pinyin" class="pinyin-line"></div>
+            <div class="actions">
+              <button id="btn-en-speak" title="Read aloud">🔊 Listen</button>
+              <button id="btn-en-save" title="Save to your list">☆ Save</button>
+              <button id="btn-en-open" title="Break it down word by word">Word by word →</button>
+            </div>
+          </div>
+          <div id="en-status" class="translation missing" hidden></div>
+          <div id="en-dict" hidden>
+            <div class="section-label">Dictionary</div>
+            <ul id="en-list" class="word-list"></ul>
           </div>
         </section>
 

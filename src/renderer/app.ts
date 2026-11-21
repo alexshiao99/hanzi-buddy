@@ -1,6 +1,6 @@
-import { hotkeyLabel } from '../shared/hotkey';
+import { hotkeyLabel, translateHotkeyLabel } from '../shared/hotkey';
 import { groupSaved, plain } from '../shared/saved-order';
-import type { HanziApi, LookupResult, SavedItem, SavedSort, Settings, WordInfo } from '../shared/types';
+import type { EnglishMatch, HanziApi, LookupResult, SavedItem, SavedSort, Settings, WordInfo } from '../shared/types';
 
 declare global {
   interface Window {
@@ -68,7 +68,8 @@ function confirmClick(button: HTMLElement, restore: () => void, label = 'Delete?
 
 // ---- state --------------------------------------------------------------------------------------
 
-type View = 'lookup' | 'saved' | 'review';
+type View = 'lookup' | 'translate' | 'saved' | 'review';
+const VIEWS: View[] = ['lookup', 'translate', 'saved', 'review'];
 
 let settings: Settings;
 let savedItems: SavedItem[] = [];
@@ -81,16 +82,19 @@ async function refreshSaved(): Promise<void> {
   savedItems = await api.listSaved();
   $('saved-count').textContent = savedItems.length ? String(savedItems.length) : '';
   if (current) renderResult();
+  renderTranslate();
   if (!$('view-saved').hidden) renderSaved();
 }
 
 function switchView(view: View): void {
-  for (const v of ['lookup', 'saved', 'review'] as View[]) $(`view-${v}`).hidden = v !== view;
+  for (const v of VIEWS) $(`view-${v}`).hidden = v !== view;
+  api.setView(view);
   document.querySelectorAll<HTMLButtonElement>('.tabs button').forEach((b) => {
     b.classList.toggle('active', b.dataset.view === view);
   });
   if (view === 'saved') renderSaved();
   if (view === 'review') startReview();
+  if (view === 'translate') $<HTMLInputElement>('en-input').focus();
 }
 
 const canTranslate = (s: Settings | undefined) => !!s && s.onlineTranslation && s.translationNoticeSeen;
@@ -103,6 +107,9 @@ function applySettings(s: Settings): void {
   if (s.savedSort !== previousSort && !$('view-saved').hidden) renderSaved();
   $('translation-notice').hidden = s.translationNoticeSeen;
   const label = hotkeyLabel(s.hotkey);
+  const translateKey = translateHotkeyLabel(s.translateHotkey);
+  $('en-hotkey-hint').textContent =
+    s.translateHotkey === 'Off' ? '' : `Open this tab from anywhere with ${translateKey}.`;
   $('hotkey-hint').replaceChildren(...Array.from(label, (key) => h('kbd', { text: key })));
   document.body.classList.toggle('tones', s.toneColors);
   const watch = $('btn-watch');
@@ -115,6 +122,7 @@ function applySettings(s: Settings): void {
 
   const popup = s.mode === 'hidden';
   document.body.classList.toggle('popup', popup);
+  $('btn-close').title = popup ? 'Close (Esc)' : `Close: switches to hidden mode (highlight Chinese, press ${label})`;
   const mode = $('btn-mode');
   mode.textContent = popup ? '▣' : '◌';
   mode.title = popup
@@ -125,6 +133,7 @@ function applySettings(s: Settings): void {
     if (!couldTranslate && canTranslate(s)) void runTranslation(current.result, lookupSeq);
     else renderResult(); // the "translation off" message depends on these settings
   }
+  renderTranslate();
 }
 
 // ---- speech -------------------------------------------------------------------------------------
@@ -272,6 +281,115 @@ async function toggleSave(button: HTMLElement, restore: () => void, hanzi: strin
     toast(`Saved ${hanzi}`);
   }
   await refreshSaved();
+}
+
+// ---- translate view (English → Chinese) --------------------------------------------------------
+
+const HAN = /\p{Script=Han}/u;
+
+interface EnState {
+  english: string;
+  /** Online answer and its pinyin; null while pending or unavailable. */
+  chinese: string | null;
+  pinyin: string;
+  translating: boolean;
+  submitted: boolean;
+  matches: EnglishMatch[];
+}
+
+let en: EnState = { english: '', chinese: null, pinyin: '', translating: false, submitted: false, matches: [] };
+let enSeq = 0;
+let enTimer: number | undefined;
+
+/** Dictionary matches update as you type; nothing is sent online until Enter. */
+function onEnInput(): void {
+  clearTimeout(enTimer);
+  const text = $<HTMLInputElement>('en-input').value.trim();
+  enTimer = window.setTimeout(async () => {
+    const seq = ++enSeq;
+    const matches = text && !HAN.test(text) ? await api.searchEnglish(text) : [];
+    if (seq !== enSeq) return;
+    en = { english: text, chinese: null, pinyin: '', translating: false, submitted: false, matches };
+    renderTranslate();
+  }, 200);
+}
+
+async function submitEnglish(): Promise<void> {
+  clearTimeout(enTimer);
+  const text = $<HTMLInputElement>('en-input').value.trim();
+  if (!text) return;
+  // Chinese typed or pasted here gets the normal lookup card.
+  if (HAN.test(text)) return void showLookup(text);
+  const seq = ++enSeq;
+  en = { english: text, chinese: null, pinyin: '', translating: canTranslate(settings), submitted: true, matches: en.matches };
+  renderTranslate();
+  const [matches, chinese] = await Promise.all([api.searchEnglish(text), canTranslate(settings) ? api.translateToChinese(text) : null]);
+  const pinyin = chinese ? (await api.lookup(chinese)).pinyin : '';
+  if (seq !== enSeq) return;
+  en = { english: text, chinese, pinyin, translating: false, submitted: true, matches };
+  renderTranslate();
+}
+
+function renderTranslate(): void {
+  const { chinese, pinyin, translating, submitted, matches, english } = en;
+  $('en-empty').hidden = !!english;
+  $('en-result').hidden = !chinese;
+  if (chinese) {
+    $('en-hanzi').textContent = chinese;
+    const len = Array.from(chinese).length;
+    $('en-hanzi').className = `hanzi ${len > 24 ? 'long' : len > 8 ? 'medium' : ''}`;
+    $('en-pinyin').textContent = pinyin;
+    const isSaved = !!savedByHanzi(chinese);
+    const saveBtn = $('btn-en-save');
+    disarm(saveBtn);
+    saveBtn.textContent = isSaved ? '★ Saved' : '☆ Save';
+    saveBtn.classList.toggle('saved', isSaved);
+  }
+
+  let message = '';
+  if (translating) message = 'Translating…';
+  else if (submitted && !chinese) {
+    message = canTranslate(settings)
+      ? 'Translation unavailable (offline?).'
+      : 'Online translation is off (turn it on in the 汉 menu).';
+    message += matches.length ? ' Dictionary matches are below.' : ' No dictionary matches either.';
+  } else if (english && !submitted && !matches.length) message = 'Press Enter to translate.';
+  const status = $('en-status');
+  status.className = translating ? 'translation pending' : 'translation missing';
+  status.textContent = message;
+  status.hidden = !message;
+
+  $('en-dict').hidden = matches.length === 0;
+  $('en-list').replaceChildren(...matches.map(matchRow));
+}
+
+function matchRow(match: EnglishMatch): HTMLLIElement {
+  const saved = savedByHanzi(match.hanzi);
+  const starText = saved ? '★' : '☆';
+  const star: HTMLButtonElement = h('button', {
+    text: starText,
+    className: saved ? 'saved' : '',
+    title: saved ? 'Remove from saved' : 'Save this word',
+    onClick: () =>
+      void toggleSave(star, () => (star.textContent = starText), match.hanzi, match.pinyin, match.defs.slice(0, 3).join('; ')),
+  });
+  return h(
+    'li',
+    {},
+    h('div', { className: 'entry-hanzi', text: match.hanzi, title: 'Open in Lookup', onClick: () => void showLookup(match.hanzi) }),
+    h(
+      'div',
+      { className: 'entry-body' },
+      h('div', { className: 'entry-pinyin', text: match.pinyin }),
+      h('div', { className: 'entry-defs', text: match.defs.join('; ') }),
+    ),
+    h(
+      'div',
+      { className: 'entry-actions' },
+      h('button', { text: '🔊', title: 'Listen', onClick: () => say(match.hanzi) }),
+      star,
+    ),
+  );
 }
 
 // ---- saved view ---------------------------------------------------------------------------------
@@ -443,6 +561,20 @@ function wire(): void {
     toast('Pinyin copied');
   });
 
+  $('en-input').addEventListener('input', onEnInput);
+  $('en-input').addEventListener('search', onEnInput); // Esc / the ✕ clear the box
+  $('en-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    void submitEnglish();
+  });
+  $('btn-en-speak').addEventListener('click', () => en.chinese && say(en.chinese));
+  $('btn-en-save').addEventListener('click', () => {
+    if (en.chinese) void toggleSave($('btn-en-save'), renderTranslate, en.chinese, en.pinyin, en.english);
+  });
+  const openEn = () => en.chinese && void showLookup(en.chinese);
+  $('btn-en-open').addEventListener('click', openEn);
+  $('en-hanzi').addEventListener('click', openEn);
+
   $('search').addEventListener('input', renderSaved);
   const savedSort = $<HTMLSelectElement>('saved-sort');
   savedSort.addEventListener('change', () => void api.setSettings({ savedSort: savedSort.value as SavedSort }));
@@ -467,6 +599,16 @@ function wire(): void {
   api.onIncomingText((text) => void showLookup(text));
   api.onNotice(toast);
   api.onSettings(applySettings);
+  api.onOpenTranslate(() => {
+    switchView('translate');
+    const input = $<HTMLInputElement>('en-input');
+    input.focus();
+    input.select(); // type straight over the last query
+  });
+  // Esc clears the box (the browser does that for search inputs); Esc on an empty box puts it away.
+  $('en-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !(e.target as HTMLInputElement).value) void api.dismissTranslate();
+  });
 }
 
 async function init(): Promise<void> {

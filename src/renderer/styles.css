@@ -98,8 +98,21 @@ details,
 }
 
 .tabs button {
-  padding: 4px 7px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 5px 8px;
   white-space: nowrap;
+}
+
+.tabs svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .controls {
@@ -138,11 +151,20 @@ button:disabled {
   font-weight: 600;
 }
 
+.tabs button.active svg {
+  stroke-width: 1.7;
+}
+
 button.icon {
   background: transparent;
   color: var(--muted);
   width: 26px;
   padding: 3px 0;
+}
+
+/* Card mode: ✕ already switches to hidden mode, so the mode button only shows in the popup (as ▣). */
+body:not(.popup) #btn-mode {
+  display: none;
 }
 
 /* Hidden-mode popup: clipboard and always-on-top controls don't apply. */
@@ -486,4 +508,31 @@ button.confirm {
   color: var(--bg);
   font-size: 12px;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
+}
+
+/* ---- translate (English → Chinese) ---- */
+
+.toolbar button[type='submit'] {
+  flex-shrink: 0;
+}
+
+.en-result {
+  margin-top: 14px;
+}
+
+.en-result .hanzi {
+  cursor: pointer;
+}
+
+#en-status {
+  margin-top: 12px;
+}
+
+.section-label {
+  margin-top: 14px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }

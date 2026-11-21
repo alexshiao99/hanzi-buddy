@@ -15,9 +15,17 @@ import {
   Tray,
 } from 'electron';
 import type { AppMode, IncomingSource, SavedItem, Settings } from '../shared/types';
-import { HOTKEY_CHOICES, hotkeyLabel as formatHotkey } from '../shared/hotkey';
+import {
+  doubleTapModifier,
+  HOTKEY_CHOICES,
+  hotkeyLabel as formatHotkey,
+  TRANSLATE_HOTKEY_CHOICES,
+  translateHotkeyLabel,
+  translateHotkeyMenuLabel,
+} from '../shared/hotkey';
+import { DoubleTapWatcher } from './double-tap';
 import { ClipboardWatcher, grabSelection, hasAccessibility } from './capture';
-import { Dictionary, translate } from './lookup';
+import { Dictionary, translate, type Direction } from './lookup';
 import { SelectionWatcher } from './selection';
 import { speak } from './speech';
 import { SavedStore, SettingsStore } from './storage';
@@ -31,6 +39,9 @@ let settings: SettingsStore;
 let saved: SavedStore;
 let watcher: ClipboardWatcher;
 let selection: SelectionWatcher;
+let doubleTap: DoubleTapWatcher;
+/** The tab the renderer is showing. */
+let currentView = 'lookup';
 let dialogOpen = false;
 
 /** bin/ and data/ sit in the project during development and in Contents/Resources once packaged. */
@@ -131,7 +142,7 @@ function createWindow(): BrowserWindow {
   w.on('close', (e) => {
     if (!quitting) {
       e.preventDefault();
-      w.hide();
+      putAway();
     }
   });
 
@@ -147,9 +158,11 @@ function applyAlwaysOnTop(w: BrowserWindow, onTop: boolean): void {
   w.setVisibleOnAllWorkspaces(onTop, { visibleOnFullScreen: true });
 }
 
-/** Card mode: show without stealing focus from what you're reading. */
+/** Card mode: show without stealing focus from what you're reading. The card is never hidden in card mode. */
 function showCard(): void {
-  if (win && !win.isVisible()) win.showInactive();
+  if (!win) return;
+  if (app.isHidden()) app.show();
+  if (!win.isVisible()) win.showInactive();
 }
 
 /** Hidden mode: open at the cursor and take focus so Esc / clicking away dismisses it. */
@@ -159,6 +172,15 @@ function showPopup(): void {
   app.focus({ steal: true });
   win.show();
   win.focus();
+}
+
+/**
+ * ✕ / closing the window. There's no hidden card: putting the card away switches to hidden mode,
+ * and in hidden mode it closes the popup.
+ */
+function putAway(): void {
+  if (isHidden()) hidePopup();
+  else updateSettings({ mode: 'hidden' });
 }
 
 function hidePopup(): void {
@@ -199,8 +221,6 @@ function sendIncoming(text: string, source: IncomingSource): void {
     if (source === 'clipboard') return; // hidden mode only reacts to the hotkey
     showPopup();
   } else {
-    // A closed card stays closed: copying text doesn't bring it back, only the hotkey or the 汉 menu does.
-    if (source === 'clipboard' && !win?.isVisible()) return;
     showCard();
   }
   sendToRenderer('incoming-text', text, source);
@@ -234,6 +254,11 @@ function notice(message: string, short = message): void {
 function updateSettings(patch: Partial<Settings>): Settings {
   const prev = settings.get();
   const prevMode = prev.mode;
+  if (patch.translateHotkey && patch.translateHotkey !== prev.translateHotkey && !applyTranslateHotkey(patch.translateHotkey)) {
+    applyTranslateHotkey(prev.translateHotkey);
+    notice(`${translateHotkeyLabel(patch.translateHotkey)} is used by another app.`, 'hotkey unavailable');
+    patch = { ...patch, translateHotkey: prev.translateHotkey };
+  }
   if (patch.hotkey && patch.hotkey !== prev.hotkey && !registerHotkey(patch.hotkey)) {
     registerHotkey(prev.hotkey);
     notice(`${formatHotkey(patch.hotkey)} is used by another app. Keeping ${formatHotkey(prev.hotkey)}.`, 'hotkey unavailable');
@@ -289,12 +314,65 @@ async function onHotkey(): Promise<void> {
   }
 }
 
+let lookupAccelerator: string | null = null;
 function registerHotkey(hotkey: string): boolean {
-  globalShortcut.unregisterAll();
+  if (lookupAccelerator) globalShortcut.unregister(lookupAccelerator);
+  lookupAccelerator = null;
   try {
-    return globalShortcut.register(hotkey, () => void onHotkey());
+    if (!globalShortcut.register(hotkey, () => void onHotkey())) return false;
+    lookupAccelerator = hotkey;
+    return true;
   } catch {
     return false; // not a valid accelerator (hand-edited settings)
+  }
+}
+
+// ---- translate shortcut (EN→中) -----------------------------------------------------------------
+
+/** Opens EN→中 with its text box focused; pressing it again while it's in front puts it away. */
+function onTranslateHotkey(): void {
+  if (!win) return;
+  if (win.isVisible() && win.isFocused() && currentView === 'translate') {
+    dismissTranslate();
+    return;
+  }
+  if (isHidden()) {
+    showPopup();
+  } else {
+    if (app.isHidden()) app.show();
+    app.focus({ steal: true });
+    win.show();
+    win.focus();
+  }
+  sendToRenderer('open-translate');
+}
+
+/** Hands focus back to the app you were in. In card mode the card stays on screen. */
+function dismissTranslate(): void {
+  if (!win) return;
+  if (isHidden()) return hidePopup();
+  app.hide(); // returns focus to the previous app…
+  app.show(); // …and brings the card back without focusing it
+}
+
+let translateAccelerator: string | null = null;
+function applyTranslateHotkey(hotkey: string): boolean {
+  doubleTap.stop();
+  if (translateAccelerator) globalShortcut.unregister(translateAccelerator);
+  translateAccelerator = null;
+  if (hotkey === 'Off') return true;
+  const modifier = doubleTapModifier(hotkey);
+  if (modifier) {
+    if (!hasAccessibility(false)) hasAccessibility(true); // the key watcher needs it too
+    doubleTap.start(modifier);
+    return true;
+  }
+  try {
+    if (!globalShortcut.register(hotkey, onTranslateHotkey)) return false;
+    translateAccelerator = hotkey;
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -312,9 +390,7 @@ function rebuildTrayMenu(): void {
   const hidden = s.mode === 'hidden';
   tray.setContextMenu(
     Menu.buildFromTemplate([
-      hidden
-        ? { label: 'Show card', click: () => updateSettings({ mode: 'card' }) }
-        : { label: win?.isVisible() ? 'Hide card' : 'Show card', click: () => toggleCard() },
+      ...(hidden ? [{ label: 'Show card', click: () => updateSettings({ mode: 'card' }) }] : []),
       {
         label: 'Hidden mode',
         sublabel: `No window — highlight Chinese, press ${hotkeyLabel()}`,
@@ -343,18 +419,21 @@ function rebuildTrayMenu(): void {
           click: () => updateSettings({ hotkey }),
         })),
       },
+      {
+        label: 'Translate shortcut (EN→中)',
+        sublabel: doubleTapModifier(s.translateHotkey) && !doubleTap.permitted ? 'Needs Accessibility permission' : undefined,
+        submenu: TRANSLATE_HOTKEY_CHOICES.map((translateHotkey) => ({
+          label: translateHotkeyMenuLabel(translateHotkey),
+          type: 'radio' as const,
+          checked: translateHotkey === s.translateHotkey,
+          click: () => updateSettings({ translateHotkey }),
+        })),
+      },
       { label: 'Open Accessibility settings…', click: () => void shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility') },
       { type: 'separator' },
       { label: 'Quit Hanzi Buddy', click: () => app.quit() },
     ]),
   );
-}
-
-function toggleCard(): void {
-  if (!win) return;
-  if (win.isVisible()) win.hide();
-  else win.show();
-  rebuildTrayMenu();
 }
 
 function createTray(): void {
@@ -369,11 +448,14 @@ function createTray(): void {
 function registerIpc(): void {
   ipcMain.handle('lookup', (_e, text: string) => getDict().lookup(text));
   // net.fetch uses Chromium's network stack.
-  ipcMain.handle('translate', (_e, text: string) => {
+  const online = (text: string, direction: Direction) => {
     const { onlineTranslation, translationNoticeSeen } = settings.get();
     if (!onlineTranslation || !translationNoticeSeen) return null;
-    return translate(text, (url, init) => net.fetch(url, init));
-  });
+    return translate(text, (url, init) => net.fetch(url, init), direction);
+  };
+  ipcMain.handle('translate', (_e, text: string) => online(text, 'zh-en'));
+  ipcMain.handle('translate:en-zh', (_e, text: string) => online(text, 'en-zh'));
+  ipcMain.handle('search-english', (_e, text: string) => getDict().english(text));
   ipcMain.handle('speak', (_e, text: string, slow: boolean) => speak(text, slow));
   ipcMain.handle('copy-text', (_e, text: string) => {
     watcher.markSeen(text);
@@ -400,13 +482,13 @@ function registerIpc(): void {
     }
   });
 
+  ipcMain.on('view', (_e, view: string) => {
+    currentView = view;
+  });
+  ipcMain.handle('translate:dismiss', () => dismissTranslate());
   ipcMain.handle('settings:get', () => settings.get());
   ipcMain.handle('settings:set', (_e, patch: Partial<Settings>) => updateSettings(patch));
-  ipcMain.handle('window:hide', () => {
-    if (isHidden()) hidePopup();
-    else win?.hide();
-    rebuildTrayMenu();
-  });
+  ipcMain.handle('window:hide', () => putAway());
 }
 
 // ---- lifecycle ----------------------------------------------------------------------------------
@@ -418,6 +500,7 @@ app.on('before-quit', () => {
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
   selection?.stop();
+  doubleTap?.stop();
 });
 app.on('second-instance', () => (isHidden() ? showPopup() : win?.show()));
 app.on('window-all-closed', () => {
@@ -431,6 +514,7 @@ void app.whenReady().then(() => {
   saved = new SavedStore(dir);
   watcher = new ClipboardWatcher((text) => sendIncoming(text, 'clipboard'));
   selection = new SelectionWatcher(resourcePath('bin', 'selection-watcher'), updateTrayTitle);
+  doubleTap = new DoubleTapWatcher(resourcePath('bin', 'modifier-tap'), onTranslateHotkey);
 
   registerIpc();
   win = createWindow();
@@ -440,6 +524,9 @@ void app.whenReady().then(() => {
   const { hotkey } = settings.get();
   if (!registerHotkey(hotkey)) {
     notice(`${formatHotkey(hotkey)} is used by another app. Pick another hotkey in the 汉 menu.`, 'hotkey unavailable');
+  }
+  if (!applyTranslateHotkey(settings.get().translateHotkey)) {
+    notice(`${translateHotkeyLabel(settings.get().translateHotkey)} is used by another app. Pick another translate shortcut in the 汉 menu.`, 'hotkey unavailable');
   }
   if (settings.get().watchClipboard) watcher.start();
   if (isHidden()) selection.start();
