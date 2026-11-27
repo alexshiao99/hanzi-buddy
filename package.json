@@ -15,7 +15,7 @@
   "dependencies": {
     "pinyin-pro": "^3.29.5"
   },
-  "description": "Floating Chinese lookup: pinyin, translation, read-aloud, saved word review",
+  "description": "Floating Chinese ↔ English lookup: pronunciation, translation, read-aloud, saved word review",
   "devDependencies": {
     "@types/node": "^26.6.6",
     "electron": "^45.2.2",
@@ -28,18 +28,42 @@
   "build": {
     "appId": "com.hanzibuddy.app",
     "electronDist": "node_modules/electron/dist",
-    "directories": { "output": "release" },
-    "files": ["dist/**/*", "!dist/test-lookup*", "!dist/**/*.map", "!node_modules/**/*"],
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "!dist/test-lookup*",
+      "!dist/**/*.map",
+      "!node_modules/**/*"
+    ],
     "extraResources": [
-      { "from": "bin", "to": "bin" },
-      { "from": "data", "to": "data" }
+      {
+        "from": "bin",
+        "to": "bin"
+      },
+      {
+        "from": "data",
+        "to": "data",
+        "filter": [
+          "cedict.txt",
+          "processed/english.tsv",
+          "raw/ecdict/LICENSE",
+          "raw/britfone/LICENSE.txt",
+          "raw/cmudict/LICENSE"
+        ]
+      }
     ],
     "mac": {
       "category": "public.app-category.education",
-      "target": ["dmg"],
+      "target": [
+        "dmg"
+      ],
       "identity": "-",
       "hardenedRuntime": false,
-      "extendInfo": { "LSUIElement": true }
+      "extendInfo": {
+        "LSUIElement": true
+      }
     }
   }
 }

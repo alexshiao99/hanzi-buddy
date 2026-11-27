@@ -1,7 +1,9 @@
 // Watches the text highlighted in the frontmost app via the macOS Accessibility API.
-// Prints one JSON string per line whenever the selection changes. Only selections that contain
-// Chinese characters are reported; anything else (and password fields) is reported as "" so the
-// parent process never sees unrelated text. Exits when stdin closes (i.e. the parent app quit).
+// Prints one JSON string per line whenever the selection changes. Only selections the app can look
+// up are reported: text containing Chinese characters, or English (Latin letters, no "://" links).
+// Anything else (and password fields) is reported as "" so the parent process never sees unrelated
+// text. The app decides which mode to open from the text itself. Exits when stdin closes (i.e. the
+// parent app quit).
 //
 // Build: clang -O2 -framework ApplicationServices native/selection-watcher.c -o bin/selection-watcher
 #include <ApplicationServices/ApplicationServices.h>
@@ -39,6 +41,21 @@ static int has_han(CFStringRef s) {
     if (c >= 0xD840 && c <= 0xD87F) return 1; // high surrogates for CJK extension planes (U+20000–U+2FFFF)
   }
   return 0;
+}
+
+static int has_latin(CFStringRef s) {
+  CFIndex n = CFStringGetLength(s);
+  for (CFIndex i = 0; i < n; i++) {
+    UniChar c = CFStringGetCharacterAtIndex(s, i);
+    if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) return 1;
+  }
+  return 0;
+}
+
+/** Chinese, or English that isn't a link. */
+static int wanted(CFStringRef s) {
+  if (has_han(s)) return 1;
+  return has_latin(s) && CFStringFind(s, CFSTR("://"), 0).location == kCFNotFound;
 }
 
 /** PID of the app owning the frontmost normal window (layer 0), or -1. */
@@ -92,7 +109,7 @@ static void enable_web_accessibility(AXUIElementRef appEl, pid_t pid) {
   if (filled < SLOTS) filled++;
 }
 
-/** Returns a new string with the current Chinese selection, or NULL. */
+/** Returns a new string with the current Chinese or English selection, or NULL. */
 static CFStringRef current_selection(void) {
   CFStringRef result = NULL;
   // Ask the frontmost app (more reliable than the system-wide element) for its focused element.
@@ -118,7 +135,7 @@ static CFStringRef current_selection(void) {
     CFMutableStringRef trimmed = CFStringCreateMutableCopy(NULL, 0, (CFStringRef)text);
     CFStringTrimWhitespace(trimmed);
     CFIndex len = CFStringGetLength(trimmed);
-    if (len > 0 && len <= MAX_CHARS && has_han(trimmed)) result = trimmed;
+    if (len > 0 && len <= MAX_CHARS && wanted(trimmed)) result = trimmed;
     else CFRelease(trimmed);
   }
   CFRelease(text);

@@ -12,6 +12,8 @@ export interface WordInfo {
   /** Syllables with tone marks joined without spaces, e.g. "xǐhuan". */
   pinyin: string;
   chars: CharInfo[];
+  /** English only: American 音标; `pinyin` holds the British one. */
+  pinyinUs?: string;
   /** Dictionary definitions for the reading used in context (empty if unknown or not Chinese). */
   defs: string[];
   isHan: boolean;
@@ -19,19 +21,46 @@ export interface WordInfo {
 
 export interface LookupResult {
   text: string;
-  /** Whole-phrase pinyin, words separated by spaces: "wǒ xǐhuan xué zhōngwén". */
+  /**
+   * Whole-phrase pronunciation: pinyin with words separated by spaces ("wǒ xǐhuan xué zhōngwén"), or
+   * for English the 音标 between slashes ("/aɪ laɪk ˈkɒfi/").
+   */
   pinyin: string;
+  /** English only: the phrase's American 音标 ("/aɪ laɪk ˈkɑːfi/"); `pinyin` holds the British one. */
+  pinyinUs?: string;
+  /**
+   * Chinese words, or for English (lang 'en') English words, where `hanzi` is the word, `pinyin` its
+   * 音标, `defs` its Chinese meanings and `isHan` means "is a word".
+   */
   words: WordInfo[];
+  /** The language of `text`, which is the language being learned. */
+  lang: Lang;
 }
 
-/** A Chinese word found by searching the dictionary's English meanings. */
+/**
+ * The language being learned, which picks the card's mode. zh: Hanzi Buddy for English speakers
+ * (Chinese in, pinyin + English out, English UI). en: the mirror for Chinese speakers (English in,
+ * 音标 + Chinese out, Chinese UI).
+ */
+export type Lang = 'zh' | 'en';
+
+/** zh: the Mandarin voice. en-GB / en-US: British (Daniel) or American (Samantha) English. */
+export type Voice = 'zh' | 'en-GB' | 'en-US';
+
+/**
+ * A dictionary word found by meaning: a Chinese word for an English query, or (mirror mode) an English
+ * word for a Chinese query, where `hanzi` is the English word and `pinyin` its 音标.
+ */
 export interface EnglishMatch {
   hanzi: string;
+  /** English matches only: American 音标; `pinyin` holds the British one. */
+  pinyinUs?: string;
   /** Dictionary reading with tone marks, e.g. "chī". */
   pinyin: string;
   defs: string[];
 }
 
+/** In the English (mirror) list, `hanzi` is the English word, `pinyin` its 音标 and `translation` Chinese. */
 export interface SavedItem {
   id: string;
   hanzi: string;
@@ -70,7 +99,14 @@ export interface Settings {
   savedSort: SavedSort;
   /** Opens EN→中: "DoubleControl" (default), another "Double…" modifier, an accelerator, or "Off". */
   translateHotkey: string;
+  /**
+   * The card's mode, set automatically from the last text you copied or highlighted (and by the
+   * header switch). zh-en: learning Chinese. en-zh: the mirror, learning English.
+   */
+  direction: Direction;
 }
+
+export type Direction = 'zh-en' | 'en-zh';
 
 export type AppMode = 'card' | 'hidden';
 
@@ -79,20 +115,25 @@ export type SavedSort = 'recent' | 'pinyin' | 'practice';
 export type IncomingSource = 'clipboard' | 'hotkey';
 
 export interface HanziApi {
+  /** Chinese or English, decided by the text: anything with Chinese characters is a Chinese lookup. */
   lookup(text: string): Promise<LookupResult>;
+  /** Chinese to English, online. Null when offline or online translation is off. */
   translate(text: string): Promise<string | null>;
   /** English to Simplified Chinese, online. Null when offline or online translation is off. */
   translateToChinese(text: string): Promise<string | null>;
   /** Chinese words whose dictionary meaning matches the English, offline. */
   searchEnglish(text: string): Promise<EnglishMatch[]>;
-  speak(text: string, slow: boolean): Promise<void>;
+  /** English words whose dictionary meaning matches the Chinese, offline (mirror mode). */
+  searchChinese(text: string): Promise<EnglishMatch[]>;
+  speak(text: string, slow: boolean, voice: Voice): Promise<void>;
   copyText(text: string): Promise<void>;
 
-  listSaved(): Promise<SavedItem[]>;
-  addSaved(item: Pick<SavedItem, 'hanzi' | 'pinyin' | 'translation'>): Promise<SavedItem>;
-  updateSaved(id: string, patch: Partial<SavedItem>): Promise<SavedItem | null>;
-  removeSaved(id: string): Promise<void>;
-  exportCsv(): Promise<string | null>;
+  /** Each language has its own saved list and review deck. */
+  listSaved(lang: Lang): Promise<SavedItem[]>;
+  addSaved(lang: Lang, item: Pick<SavedItem, 'hanzi' | 'pinyin' | 'translation'>): Promise<SavedItem>;
+  updateSaved(lang: Lang, id: string, patch: Partial<SavedItem>): Promise<SavedItem | null>;
+  removeSaved(lang: Lang, id: string): Promise<void>;
+  exportCsv(lang: Lang): Promise<string | null>;
 
   getSettings(): Promise<Settings>;
   setSettings(patch: Partial<Settings>): Promise<Settings>;

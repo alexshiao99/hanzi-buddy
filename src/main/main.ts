@@ -14,7 +14,7 @@ import {
   shell,
   Tray,
 } from 'electron';
-import type { AppMode, IncomingSource, SavedItem, Settings } from '../shared/types';
+import type { AppMode, IncomingSource, Lang, SavedItem, Settings, Voice } from '../shared/types';
 import {
   doubleTapModifier,
   HOTKEY_CHOICES,
@@ -25,7 +25,8 @@ import {
 } from '../shared/hotkey';
 import { DoubleTapWatcher } from './double-tap';
 import { ClipboardWatcher, grabSelection, hasAccessibility } from './capture';
-import { Dictionary, translate, type Direction } from './lookup';
+import { EnglishDictionary } from './english';
+import { detectLang, Dictionary, translate, type Direction } from './lookup';
 import { SelectionWatcher } from './selection';
 import { speak } from './speech';
 import { SavedStore, SettingsStore } from './storage';
@@ -35,8 +36,10 @@ if (!app.requestSingleInstanceLock()) app.quit();
 let win: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let dict: Dictionary | null = null;
+let english: EnglishDictionary | null = null;
 let settings: SettingsStore;
-let saved: SavedStore;
+/** One saved list per language being learned. */
+let saved: Record<Lang, SavedStore>;
 let watcher: ClipboardWatcher;
 let selection: SelectionWatcher;
 let doubleTap: DoubleTapWatcher;
@@ -58,6 +61,18 @@ function getDict(): Dictionary {
     notice('The dictionary file is missing, so word meanings are unavailable. Run npm install to download it.', 'dictionary missing');
   }
   return dict;
+}
+
+/** Without the English word list, English lookups still get the online translation; 音标 and word meanings are empty. */
+function getEnglish(): EnglishDictionary {
+  if (english) return english;
+  try {
+    english = new EnglishDictionary(resourcePath('data', 'processed', 'english.tsv'));
+  } catch {
+    english = new EnglishDictionary();
+    notice('The English word list is missing, so 音标 and word meanings are unavailable. Run npm install to build it.', 'English list missing');
+  }
+  return english;
 }
 const isHidden = () => settings.get().mode === 'hidden';
 const hotkeyLabel = () => formatHotkey(settings.get().hotkey);
@@ -297,7 +312,7 @@ async function onHotkey(): Promise<void> {
   grabbing = true;
   try {
     // Hidden mode already knows the highlighted text; otherwise (or in apps that don't expose it) copy it.
-    const highlighted = isHidden() && selection.current;
+    const highlighted = isHidden() && detectLang(selection.current) ? selection.current : '';
     if (highlighted) {
       sendIncoming(highlighted, 'hotkey');
       return;
@@ -306,7 +321,7 @@ async function onHotkey(): Promise<void> {
     if (grabbed.status === 'text') sendIncoming(grabbed.text, 'hotkey');
     else if (grabbed.status === 'too-long') notice('That selection is too long. Select 300 characters or fewer.', 'selection too long');
     else if (grabbed.status === 'helper-missing') notice('The selection helper is missing. Install Xcode Command Line Tools and rebuild.', 'helper missing');
-    else notice('No Chinese text selected.', 'no Chinese selected');
+    else notice('No Chinese or English text selected. 没有选中中文或英文。', 'nothing to look up');
   } catch {
     notice('Could not copy the selection. Check the Accessibility permission.', 'could not read selection');
   } finally {
@@ -378,7 +393,7 @@ function applyTranslateHotkey(hotkey: string): boolean {
 
 // ---- tray ---------------------------------------------------------------------------------------
 
-/** In hidden mode the menu bar hints at the hotkey whenever Chinese text is highlighted. */
+/** In hidden mode the menu bar hints at the hotkey whenever Chinese or English text is highlighted. */
 function updateTrayTitle(): void {
   if (!tray) return;
   tray.setTitle(isHidden() && selection.current ? `汉 ${hotkeyLabel()}` : '汉');
@@ -392,8 +407,23 @@ function rebuildTrayMenu(): void {
     Menu.buildFromTemplate([
       ...(hidden ? [{ label: 'Show card', click: () => updateSettings({ mode: 'card' }) }] : []),
       {
+        label: 'Learning Chinese (中→EN)',
+        sublabel: 'Switches by itself when you copy or highlight Chinese',
+        type: 'radio',
+        checked: s.direction === 'zh-en',
+        click: () => updateSettings({ direction: 'zh-en' }),
+      },
+      {
+        label: '学英语 (EN→中)',
+        sublabel: '复制或选中英文时自动切换',
+        type: 'radio',
+        checked: s.direction === 'en-zh',
+        click: () => updateSettings({ direction: 'en-zh' }),
+      },
+      { type: 'separator' },
+      {
         label: 'Hidden mode',
-        sublabel: `No window — highlight Chinese, press ${hotkeyLabel()}`,
+        sublabel: `No window — highlight Chinese or English, press ${hotkeyLabel()}`,
         type: 'checkbox',
         checked: hidden,
         click: (i) => updateSettings({ mode: i.checked ? 'hidden' : 'card' }),
@@ -446,7 +476,7 @@ function createTray(): void {
 // ---- IPC ----------------------------------------------------------------------------------------
 
 function registerIpc(): void {
-  ipcMain.handle('lookup', (_e, text: string) => getDict().lookup(text));
+  ipcMain.handle('lookup', (_e, text: string) => (detectLang(text) === 'en' ? getEnglish().lookup(text) : getDict().lookup(text)));
   // net.fetch uses Chromium's network stack.
   const online = (text: string, direction: Direction) => {
     const { onlineTranslation, translationNoticeSeen } = settings.get();
@@ -456,26 +486,28 @@ function registerIpc(): void {
   ipcMain.handle('translate', (_e, text: string) => online(text, 'zh-en'));
   ipcMain.handle('translate:en-zh', (_e, text: string) => online(text, 'en-zh'));
   ipcMain.handle('search-english', (_e, text: string) => getDict().english(text));
-  ipcMain.handle('speak', (_e, text: string, slow: boolean) => speak(text, slow));
+  ipcMain.handle('search-chinese', (_e, text: string) => getEnglish().chinese(text));
+  ipcMain.handle('speak', (_e, text: string, slow: boolean, voice: Voice) => speak(text, slow, voice));
   ipcMain.handle('copy-text', (_e, text: string) => {
     watcher.markSeen(text);
     return clipboard.writeText(text);
   });
 
-  ipcMain.handle('saved:list', () => saved.list());
-  ipcMain.handle('saved:add', (_e, item: Pick<SavedItem, 'hanzi' | 'pinyin' | 'translation'>) => saved.add(item));
-  ipcMain.handle('saved:update', (_e, id: string, patch: Partial<SavedItem>) => saved.update(id, patch));
-  ipcMain.handle('saved:remove', (_e, id: string) => saved.remove(id));
-  ipcMain.handle('saved:export', async () => {
+  const store = (lang: Lang) => saved[lang === 'en' ? 'en' : 'zh'];
+  ipcMain.handle('saved:list', (_e, lang: Lang) => store(lang).list());
+  ipcMain.handle('saved:add', (_e, lang: Lang, item: Pick<SavedItem, 'hanzi' | 'pinyin' | 'translation'>) => store(lang).add(item));
+  ipcMain.handle('saved:update', (_e, lang: Lang, id: string, patch: Partial<SavedItem>) => store(lang).update(id, patch));
+  ipcMain.handle('saved:remove', (_e, lang: Lang, id: string) => store(lang).remove(id));
+  ipcMain.handle('saved:export', async (_e, lang: Lang) => {
     const opts = {
-      defaultPath: path.join(app.getPath('downloads'), 'hanzi-buddy-words.csv'),
+      defaultPath: path.join(app.getPath('downloads'), lang === 'en' ? 'hanzi-buddy-english-words.csv' : 'hanzi-buddy-words.csv'),
       filters: [{ name: 'CSV', extensions: ['csv'] }],
     };
     dialogOpen = true; // don't auto-hide the popup while the save dialog has focus
     try {
       const { canceled, filePath } = win ? await dialog.showSaveDialog(win, opts) : await dialog.showSaveDialog(opts);
       if (canceled || !filePath) return null;
-      writeFileSync(filePath, '﻿' + saved.toCsv()); // BOM so Excel reads UTF-8 Chinese correctly
+      writeFileSync(filePath, '﻿' + store(lang).toCsv()); // BOM so Excel reads UTF-8 Chinese correctly
       return filePath;
     } finally {
       dialogOpen = false;
@@ -511,7 +543,7 @@ void app.whenReady().then(() => {
   app.dock?.hide();
   const dir = app.getPath('userData');
   settings = new SettingsStore(dir);
-  saved = new SavedStore(dir);
+  saved = { zh: new SavedStore(dir, 'zh'), en: new SavedStore(dir, 'en') };
   watcher = new ClipboardWatcher((text) => sendIncoming(text, 'clipboard'));
   selection = new SelectionWatcher(resourcePath('bin', 'selection-watcher'), updateTrayTitle);
   doubleTap = new DoubleTapWatcher(resourcePath('bin', 'modifier-tap'), onTranslateHotkey);
@@ -530,5 +562,8 @@ void app.whenReady().then(() => {
   }
   if (settings.get().watchClipboard) watcher.start();
   if (isHidden()) selection.start();
-  setTimeout(getDict, 50); // warm the dictionary (~200ms) after the window is up
+  setTimeout(() => {
+    getDict(); // warm the dictionaries (~200ms each) after the window is up
+    getEnglish();
+  }, 50);
 });

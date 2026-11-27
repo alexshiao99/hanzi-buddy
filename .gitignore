@@ -1,6 +1,8 @@
 node_modules/
 dist/
 data/cedict.txt
+data/raw/
+data/processed/
 bin/
 dist-test/
 release/

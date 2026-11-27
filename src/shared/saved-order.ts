@@ -1,4 +1,4 @@
-import type { SavedItem, SavedSort } from './types';
+import type { Lang, SavedItem, SavedSort } from './types';
 
 export interface SavedGroup {
   label: string;
@@ -10,8 +10,11 @@ export const plain = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').t
 
 const newestFirst = (a: SavedItem, b: SavedItem) => b.addedAt - a.addedAt;
 
-/** Letters only, so spaces and punctuation in a phrase's pinyin don't affect where it sorts. */
-const pinyinKey = (i: SavedItem) => plain(i.pinyin).replace(/[^a-z]/g, '');
+/**
+ * Letters only, so spaces and punctuation in a phrase's pinyin don't affect where it sorts. English
+ * words (mirror mode) sort by the word itself, not its 音标.
+ */
+const sortKey = (i: SavedItem, lang: Lang) => plain(lang === 'zh' ? i.pinyin : i.hanzi).replace(/[^a-z]/g, '');
 
 function groupsInOrder(items: SavedItem[], labelFor: (i: SavedItem) => string): SavedGroup[] {
   const groups = new Map<string, SavedItem[]>();
@@ -34,14 +37,15 @@ function byRecent(items: SavedItem[], now: number): SavedGroup[] {
   );
 }
 
-function byPinyin(items: SavedItem[]): SavedGroup[] {
+function byPinyin(items: SavedItem[], lang: Lang): SavedGroup[] {
+  const key = (i: SavedItem) => sortKey(i, lang);
   const sorted = [...items].sort((a, b) => {
-    const [ka, kb] = [pinyinKey(a), pinyinKey(b)];
+    const [ka, kb] = [key(a), key(b)];
     if (!ka !== !kb) return ka ? -1 : 1; // no pinyin goes last
     if (ka !== kb) return ka < kb ? -1 : 1;
     return a.pinyin.localeCompare(b.pinyin) || a.hanzi.localeCompare(b.hanzi);
   });
-  return groupsInOrder(sorted, (i) => pinyinKey(i)[0]?.toUpperCase() ?? '#');
+  return groupsInOrder(sorted, (i) => key(i)[0]?.toUpperCase() ?? '#');
 }
 
 function byPractice(items: SavedItem[]): SavedGroup[] {
@@ -59,9 +63,12 @@ function byPractice(items: SavedItem[]): SavedGroup[] {
   ].filter((g) => g.items.length > 0);
 }
 
-/** Sorts items and splits them into labelled sections, leaving out any empty ones. */
-export function groupSaved(items: SavedItem[], sort: SavedSort, now: number): SavedGroup[] {
-  if (sort === 'pinyin') return byPinyin(items);
+/**
+ * Sorts items and splits them into labelled sections, leaving out any empty ones. Labels are English
+ * ('Today', 'Missed', …, or a letter); the renderer translates them in mirror mode.
+ */
+export function groupSaved(items: SavedItem[], sort: SavedSort, now: number, lang: Lang = 'zh'): SavedGroup[] {
+  if (sort === 'pinyin') return byPinyin(items, lang);
   if (sort === 'practice') return byPractice(items);
   return byRecent(items, now);
 }

@@ -79,3 +79,31 @@ describe('SettingsStore', () => {
     assert.equal(new SettingsStore(dir).get().onlineTranslation, false);
   });
 });
+
+describe('SettingsStore direction', () => {
+  it('defaults to 中→EN and keeps a valid choice', () => {
+    assert.equal(new SettingsStore(dir).get().direction, 'zh-en');
+    new SettingsStore(dir).set({ direction: 'en-zh' });
+    assert.equal(new SettingsStore(dir).get().direction, 'en-zh');
+  });
+
+  it('ignores an unknown direction', () => {
+    writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ direction: 'fr-zh' }));
+    assert.equal(new SettingsStore(dir).get().direction, DEFAULT_SETTINGS.direction);
+  });
+});
+
+describe('SavedStore per language', () => {
+  it('keeps English words in their own file, apart from the Chinese list', () => {
+    new SavedStore(dir, 'en').add({ hanzi: 'happy', pinyin: 'ˈhæpi', translation: 'a. 快乐的' });
+    assert.equal(new SavedStore(dir, 'zh').list().length, 0);
+    assert.deepEqual(new SavedStore(dir, 'en').list().map((i) => i.hanzi), ['happy']);
+    assert.ok(readdirSync(dir).includes('saved-en.json'));
+  });
+
+  it('labels English CSV columns for Chinese speakers', () => {
+    const store = new SavedStore(dir, 'en');
+    store.add({ hanzi: 'happy', pinyin: 'ˈhæpi', translation: '快乐的' });
+    assert.match(store.toCsv(), /^word,phonetic,chinese,note,added\n"happy","ˈhæpi","快乐的",""/);
+  });
+});

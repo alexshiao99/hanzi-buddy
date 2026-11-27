@@ -1,11 +1,24 @@
 import { readFileSync } from 'node:fs';
 import { convert, pinyin } from 'pinyin-pro';
-import type { CharInfo, EnglishMatch, LookupResult, WordInfo } from '../shared/types';
+import type { CharInfo, Direction, EnglishMatch, Lang, LookupResult, WordInfo } from '../shared/types';
 
 const HAN = /\p{Script=Han}/u;
 const MAX_WORD_LEN = 8;
 
 export const hasHan = (s: string): boolean => HAN.test(s);
+
+/** Copied links, emails and file paths aren't English to learn. */
+const NOT_PROSE = /:\/\/|^www\.|\S@\S|^[~/]\S*\//i;
+
+/**
+ * Which mode copied or highlighted text opens: 'zh' for anything with Chinese characters, 'en' for
+ * English (Latin letters, no Chinese, not a link), null for anything else.
+ */
+export function detectLang(text: string): Lang | null {
+  if (hasHan(text)) return 'zh';
+  if (/[A-Za-z]/.test(text) && !NOT_PROSE.test(text)) return 'en';
+  return null;
+}
 
 interface DictEntry {
   simp: string;
@@ -275,7 +288,7 @@ export class Dictionary {
       phrasePinyin += phrasePinyin && !attach ? ` ${part}` : part;
     }
 
-    return { text, pinyin: phrasePinyin, words };
+    return { text, pinyin: phrasePinyin, words, lang: 'zh' };
   }
 }
 
@@ -287,7 +300,7 @@ function compareRanks(a: number[], b: number[]): number {
 export type FetchLike = (url: string, init?: { signal?: AbortSignal }) => Promise<Response>;
 
 /** zh-en: Chinese to English (the card). en-zh: English to Simplified Chinese (the Translate tab). */
-export type Direction = 'zh-en' | 'en-zh';
+export type { Direction };
 const LANGS: Record<Direction, [string, string]> = { 'zh-en': ['zh-CN', 'en'], 'en-zh': ['en', 'zh-CN'] };
 
 type Provider = (text: string, fetchImpl: FetchLike, direction: Direction) => Promise<string | null>;

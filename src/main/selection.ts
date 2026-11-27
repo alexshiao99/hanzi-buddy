@@ -9,13 +9,13 @@ const HEALTHY_AFTER_MS = 30_000;
 
 /**
  * Runs the native selection-watcher helper, which reports text highlighted in the frontmost app
- * (only when it contains Chinese). Requires the Accessibility permission.
+ * (only Chinese or English text). Requires the Accessibility permission.
  */
 export class SelectionWatcher {
   private proc: ChildProcess | null = null;
   private restarts = 0;
   private restartTimer: NodeJS.Timeout | undefined;
-  /** The currently highlighted Chinese text, or "" when nothing relevant is selected. */
+  /** The currently highlighted text, or "" when nothing relevant is selected. */
   current = '';
 
   constructor(

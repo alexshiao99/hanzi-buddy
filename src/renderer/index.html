@@ -6,65 +6,66 @@
     <title>Hanzi Buddy</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
+  <!-- Text with data-i18n* attributes is filled per mode by src/renderer/i18n.ts. -->
   <body>
     <div id="card">
       <header class="drag">
         <span class="brand" title="Hanzi Buddy">汉</span>
         <nav class="tabs no-drag">
-          <button data-view="lookup" class="active" title="Lookup: pinyin and meanings for Chinese you copy or highlight" aria-label="Lookup">
+          <button data-view="lookup" class="active" data-i18n-title="tabLookup" data-i18n-aria="tabLookup">
             <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5" /><path d="M10.5 10.5 14 14" /></svg>
           </button>
-          <button data-view="translate" title="Translate English → Chinese" aria-label="Translate English to Chinese">
+          <button data-view="translate" data-i18n-title="tabTranslate" data-i18n-aria="tabTranslate">
             <svg viewBox="0 0 16 16" aria-hidden="true">
               <path d="M1.5 3.5h7M5 2v1.5M3.5 3.5c.3 2.6 2 4.6 4.5 5.5M7 3.5c-.6 3-2.4 5.3-5 6.5" />
               <path d="M8.5 14.5 11.5 7l3 7.5M9.5 12h4" />
             </svg>
           </button>
-          <button data-view="saved" title="Saved words" aria-label="Saved words">
+          <button data-view="saved" data-i18n-title="tabSaved" data-i18n-aria="tabSaved">
             <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .7 4.3L8 11.6l-3.8 2 .7-4.3-3.1-3 4.3-.6z" /></svg>
             <span id="saved-count" class="badge"></span>
           </button>
-          <button data-view="review" title="Review: flashcards of your saved words" aria-label="Review">
+          <button data-view="review" data-i18n-title="tabReview" data-i18n-aria="tabReview">
             <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="4.5" width="10" height="9" rx="1.5" /><path d="M4.5 2h8.5a1.5 1.5 0 0 1 1.5 1.5V10" /></svg>
           </button>
         </nav>
         <div class="controls no-drag">
-          <button id="btn-mode" class="icon" title="Hidden mode">◌</button>
-          <button id="btn-watch" class="icon" title="Watching clipboard (click to pause)">●</button>
-          <button id="btn-pin" class="icon" title="Always on top">⇡</button>
-          <button id="btn-close" class="icon" title="Close: switches to hidden mode">✕</button>
+          <button id="btn-direction" class="direction">中→EN</button>
+          <button id="btn-mode" class="icon">◌</button>
+          <button id="btn-watch" class="icon">●</button>
+          <button id="btn-pin" class="icon">⇡</button>
+          <button id="btn-close" class="icon">✕</button>
         </div>
       </header>
 
       <aside id="translation-notice" class="notice" hidden>
-        <p>
-          Phrase translation sends the text you look up, including Chinese you copy while clipboard watching is on and
-          English you translate with EN→中, to Google Translate and MyMemory. Pinyin, word meanings and speech stay on your Mac.
-        </p>
+        <p data-i18n="noticeText"></p>
         <div class="actions">
-          <button id="btn-allow-translation">Use online translation</button>
-          <button id="btn-deny-translation">Stay offline</button>
+          <button id="btn-allow-translation" data-i18n="noticeAllow"></button>
+          <button id="btn-deny-translation" data-i18n="noticeDeny"></button>
         </div>
       </aside>
 
       <main>
         <section id="view-lookup" class="view">
           <div id="empty" class="hint">
-            <div class="hint-big">复制 · 学习</div>
-            <p>Copy any Chinese text, or highlight it and press <span id="hotkey-hint"></span>.</p>
+            <div class="hint-big" data-i18n="emptyBig"></div>
+            <p><span data-i18n="emptyBefore"></span><span id="hotkey-hint"></span><span data-i18n="emptyAfter"></span></p>
+            <p data-i18n="emptyAuto"></p>
           </div>
           <div id="result" hidden>
             <div id="hanzi" class="hanzi"></div>
             <div id="pinyin-line" class="pinyin-line"></div>
             <div id="translation" class="translation"></div>
             <div class="actions">
-              <button id="btn-speak" title="Read aloud">🔊 Listen</button>
-              <button id="btn-slow" title="Read aloud slowly">🐢 Slow</button>
-              <button id="btn-save" title="Save to your list">☆ Save</button>
-              <button id="btn-copy-pinyin" title="Copy pinyin">Copy pinyin</button>
+              <button id="btn-speak" data-i18n="listen" data-i18n-title="listenTitle"></button>
+              <button id="btn-speak-us" class="en-only" data-i18n="listenUs" data-i18n-title="listenUsTitle"></button>
+              <button id="btn-slow" data-i18n="slow" data-i18n-title="slowTitle"></button>
+              <button id="btn-save" data-i18n-title="saveTitle"></button>
+              <button id="btn-copy-pinyin" data-i18n="copyPron" data-i18n-title="copyPronTitle"></button>
             </div>
             <details id="words">
-              <summary>Word by word</summary>
+              <summary data-i18n="wordByWord"></summary>
               <ul id="word-list" class="word-list"></ul>
             </details>
           </div>
@@ -72,60 +73,61 @@
 
         <section id="view-translate" class="view" hidden>
           <form id="en-form" class="toolbar">
-            <input id="en-input" type="search" placeholder="Type English, e.g. happy or I want coffee" autocomplete="off" spellcheck="true" />
-            <button type="submit">Translate</button>
+            <input id="en-input" type="search" data-i18n-placeholder="typePlaceholder" autocomplete="off" spellcheck="true" />
+            <button type="submit" data-i18n="typeSubmit"></button>
           </form>
           <div id="en-empty" class="hint">
-            <div class="hint-big">英 → 中</div>
-            <p>Type an English word or sentence and press Enter. Words also show matches from the offline dictionary as you type.</p>
+            <div class="hint-big" data-i18n="typeBig"></div>
+            <p data-i18n="typeHint"></p>
             <p id="en-hotkey-hint"></p>
           </div>
           <div id="en-result" class="en-result" hidden>
-            <div id="en-hanzi" class="hanzi" title="Open in Lookup for pinyin by character and word meanings"></div>
+            <div id="en-hanzi" class="hanzi" data-i18n-title="typeOpenTitle"></div>
             <div id="en-pinyin" class="pinyin-line"></div>
             <div class="actions">
-              <button id="btn-en-speak" title="Read aloud">🔊 Listen</button>
-              <button id="btn-en-save" title="Save to your list">☆ Save</button>
-              <button id="btn-en-open" title="Break it down word by word">Word by word →</button>
+              <button id="btn-en-speak" data-i18n="listen" data-i18n-title="listenTitle"></button>
+              <button id="btn-en-speak-us" class="en-only" data-i18n="listenUs" data-i18n-title="listenUsTitle"></button>
+              <button id="btn-en-save" data-i18n-title="saveTitle"></button>
+              <button id="btn-en-open" data-i18n="typeOpen" data-i18n-title="typeOpenTitle"></button>
             </div>
           </div>
           <div id="en-status" class="translation missing" hidden></div>
           <div id="en-dict" hidden>
-            <div class="section-label">Dictionary</div>
+            <div class="section-label" data-i18n="dictionary"></div>
             <ul id="en-list" class="word-list"></ul>
           </div>
         </section>
 
         <section id="view-saved" class="view" hidden>
           <div class="toolbar">
-            <input id="search" type="search" placeholder="Search saved…" />
-            <select id="saved-sort" title="Sort saved items" aria-label="Sort saved items">
-              <option value="recent">Recent</option>
-              <option value="pinyin">Pinyin A–Z</option>
-              <option value="practice">Needs practice</option>
+            <input id="search" type="search" data-i18n-placeholder="searchPlaceholder" />
+            <select id="saved-sort" data-i18n-title="sortTitle" data-i18n-aria="sortTitle">
+              <option value="recent" data-i18n="sortRecent"></option>
+              <option value="pinyin" data-i18n="sortPinyin"></option>
+              <option value="practice" data-i18n="sortPractice"></option>
             </select>
-            <button id="btn-export" title="Export as CSV (Anki-importable)">Export</button>
+            <button id="btn-export" data-i18n="export" data-i18n-title="exportTitle"></button>
           </div>
           <ul id="saved-list" class="saved-list"></ul>
-          <div id="saved-empty" class="hint" hidden>Nothing saved yet. Press ☆ Save on a lookup.</div>
+          <div id="saved-empty" class="hint" data-i18n="savedEmpty" hidden></div>
         </section>
 
         <section id="view-review" class="view" hidden>
-          <div id="review-empty" class="hint" hidden>Save a few words first, then review them here.</div>
+          <div id="review-empty" class="hint" data-i18n="reviewEmpty" hidden></div>
           <div id="review" hidden>
             <div id="review-stats" class="review-stats"></div>
-            <button id="review-card" class="review-card" title="Click or press Space to reveal">
+            <button id="review-card" class="review-card" data-i18n-title="reviewCardTitle">
               <div id="review-hanzi" class="review-hanzi"></div>
               <div id="review-answer" class="review-answer" hidden>
                 <div id="review-pinyin" class="review-pinyin"></div>
                 <div id="review-meaning" class="review-meaning"></div>
               </div>
-              <div id="review-prompt" class="review-prompt">tap to reveal</div>
+              <div id="review-prompt" class="review-prompt" data-i18n="reviewPrompt"></div>
             </button>
             <div class="actions review-actions">
-              <button id="btn-review-speak">🔊</button>
-              <button id="btn-again" class="again" disabled>Again <kbd>1</kbd></button>
-              <button id="btn-got" class="got" disabled>Got it <kbd>2</kbd></button>
+              <button id="btn-review-speak" data-i18n-title="listenWord">🔊</button>
+              <button id="btn-again" class="again" disabled><span data-i18n="again"></span> <kbd>1</kbd></button>
+              <button id="btn-got" class="got" disabled><span data-i18n="gotIt"></span> <kbd>2</kbd></button>
             </div>
           </div>
         </section>

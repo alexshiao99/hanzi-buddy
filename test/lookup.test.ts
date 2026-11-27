@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { before, describe, it } from 'node:test';
-import { Dictionary, normalizeGloss, numberedToMarks, translate, type FetchLike } from '../src/main/lookup';
+import { detectLang, Dictionary, normalizeGloss, numberedToMarks, translate, type FetchLike } from '../src/main/lookup';
 
 let dict: Dictionary;
 before(() => {
@@ -167,5 +167,25 @@ describe('translate english to chinese', () => {
       return new Response(JSON.stringify({ responseStatus: 200, responseData: { translatedText: '猫' } }));
     };
     assert.equal(await translate('cat', fetchImpl, 'en-zh'), '猫');
+  });
+});
+
+describe('detectLang', () => {
+  it('opens Chinese for anything with Chinese characters', () => {
+    assert.equal(detectLang('我喜欢 coffee'), 'zh');
+    assert.equal(detectLang('你好'), 'zh');
+  });
+
+  it('opens English for English text', () => {
+    assert.equal(detectLang('I like coffee'), 'en');
+    assert.equal(detectLang("don't"), 'en');
+  });
+
+  it('ignores text that is neither, and links, emails and paths', () => {
+    assert.equal(detectLang('12345 !!'), null);
+    assert.equal(detectLang('https://example.com/page'), null);
+    assert.equal(detectLang('www.example.com'), null);
+    assert.equal(detectLang('someone@example.com'), null);
+    assert.equal(detectLang('/usr/local/bin'), null);
   });
 });

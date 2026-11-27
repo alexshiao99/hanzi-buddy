@@ -1,13 +1,14 @@
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { clipboard, systemPreferences } from 'electron';
-import { hasHan } from './lookup';
+import { detectLang } from './lookup';
 
 const MAX_LEN = 300;
 /** Markers password managers and similar apps put on the clipboard (see nspasteboard.org). */
 const PRIVATE_FORMATS = ['org.nspasteboard.ConcealedType', 'org.nspasteboard.TransientType'];
 
-const isLookupCandidate = (text: string) => text.length > 0 && text.length <= MAX_LEN && hasHan(text);
+/** Chinese or English, up to 300 characters. Which mode it opens is decided from the text itself. */
+export const isLookupCandidate = (text: string) => text.length > 0 && text.length <= MAX_LEN && detectLang(text) !== null;
 
 async function isPrivateClipboard(): Promise<boolean> {
   const found = await Promise.all(
@@ -16,7 +17,7 @@ async function isPrivateClipboard(): Promise<boolean> {
   return found.includes(true);
 }
 
-/** Polls the clipboard and reports newly copied text that contains Chinese characters. */
+/** Polls the clipboard and reports newly copied Chinese or English text. */
 export class ClipboardWatcher {
   /** null until the next poll records what's there, so existing clipboard contents never fire. */
   private last: string | null = null;
@@ -86,7 +87,7 @@ export async function grabSelection(binPath: string, watcher: ClipboardWatcher):
   watcher.setPaused(true);
   try {
     const text = (await runHelper(binPath)).trim();
-    if (!hasHan(text)) return { status: 'none' };
+    if (!detectLang(text)) return { status: 'none' };
     return isLookupCandidate(text) ? { status: 'text', text } : { status: 'too-long' };
   } finally {
     watcher.setPaused(false);

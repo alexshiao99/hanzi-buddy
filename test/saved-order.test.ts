@@ -91,3 +91,14 @@ describe('groupSaved', () => {
     assert.deepEqual(items.map((i) => i.hanzi), ['b', 'a']);
   });
 });
+
+describe('groupSaved for English words (学英语)', () => {
+  it('sorts A–Z by the word, not its 音标', () => {
+    const items = [item('zebra', { pinyin: 'ˈziːbrə' }), item('apple', { pinyin: 'ˈæpl' }), item('Happy', { pinyin: 'ˈhæpi' })];
+    assert.deepEqual(shape(groupSaved(items, 'pinyin', now, 'en')), [
+      ['A', ['apple']],
+      ['H', ['Happy']],
+      ['Z', ['zebra']],
+    ]);
+  });
+});

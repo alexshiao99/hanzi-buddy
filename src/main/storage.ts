@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import type { Bounds, SavedItem, Settings } from '../shared/types';
+import type { Bounds, Lang, SavedItem, Settings } from '../shared/types';
 
 /** A JSON file with atomic writes (temp file + rename) so a crash can't corrupt it. */
 class JsonFile<T> {
@@ -43,6 +43,7 @@ export const DEFAULT_SETTINGS: Settings = {
   translationNoticeSeen: false,
   savedSort: 'recent',
   translateHotkey: 'DoubleControl',
+  direction: 'zh-en',
 };
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -62,6 +63,7 @@ function sanitizeSettings(raw: Record<string, unknown>): Settings {
   if (typeof raw.onlineTranslation === 'boolean') out.onlineTranslation = raw.onlineTranslation;
   if (typeof raw.translationNoticeSeen === 'boolean') out.translationNoticeSeen = raw.translationNoticeSeen;
   if (typeof raw.translateHotkey === 'string' && raw.translateHotkey) out.translateHotkey = raw.translateHotkey;
+  if (raw.direction === 'zh-en' || raw.direction === 'en-zh') out.direction = raw.direction;
   if (raw.savedSort === 'recent' || raw.savedSort === 'pinyin' || raw.savedSort === 'practice') out.savedSort = raw.savedSort;
   return out;
 }
@@ -93,12 +95,16 @@ export class SettingsStore {
   }
 }
 
+/** Chinese words live in saved.json (as before); the English (mirror mode) list in saved-en.json. */
 export class SavedStore {
   private readonly file: JsonFile<SavedItem[]>;
   private items: SavedItem[];
 
-  constructor(dir: string) {
-    this.file = new JsonFile(path.join(dir, 'saved.json'), () => [], isSavedList);
+  constructor(
+    dir: string,
+    private readonly lang: Lang = 'zh',
+  ) {
+    this.file = new JsonFile(path.join(dir, lang === 'zh' ? 'saved.json' : 'saved-en.json'), () => [], isSavedList);
     this.items = this.file.read();
   }
 
@@ -145,6 +151,7 @@ export class SavedStore {
     const rows = this.list().map((i) =>
       [i.hanzi, i.pinyin, i.translation, i.note, new Date(i.addedAt).toISOString().slice(0, 10)].map(esc).join(','),
     );
-    return ['hanzi,pinyin,translation,note,added', ...rows].join('\n') + '\n';
+    const header = this.lang === 'zh' ? 'hanzi,pinyin,translation,note,added' : 'word,phonetic,chinese,note,added';
+    return [header, ...rows].join('\n') + '\n';
   }
 }
