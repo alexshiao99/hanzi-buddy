@@ -333,9 +333,9 @@ function editNote(item: SavedItem, container: HTMLElement): void {
   const finish = async (save: boolean) => {
     if (done) return;
     done = true;
-    if (save && input.value !== item.note) await api.updateSaved(item.id, { note: input.value.trim() });
-    await refreshSaved();
-    renderSaved();
+    const note = input.value.trim();
+    if (save && note !== item.note) await api.updateSaved(item.id, { note });
+    await refreshSaved(); // re-renders the saved list, which removes the input
   };
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') void finish(true);

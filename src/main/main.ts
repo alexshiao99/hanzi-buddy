@@ -22,7 +22,8 @@ import { SelectionWatcher } from './selection';
 import { speak } from './speech';
 import { SavedStore, SettingsStore } from './storage';
 
-if (!app.requestSingleInstanceLock()) app.quit();
+const isPrimaryInstance = app.requestSingleInstanceLock();
+if (!isPrimaryInstance) app.quit();
 
 let win: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -224,7 +225,10 @@ function notice(message: string, short = message): void {
   if (isHidden()) {
     tray?.setTitle(`汉 ${short}`);
     clearTimeout(flashTimer);
-    flashTimer = setTimeout(updateTrayTitle, 2500);
+    flashTimer = setTimeout(() => {
+      flashTimer = undefined;
+      updateTrayTitle();
+    }, 2500);
     return;
   }
   showCard();
@@ -234,9 +238,10 @@ function notice(message: string, short = message): void {
 function updateSettings(patch: Partial<Settings>): Settings {
   const prev = settings.get();
   const prevMode = prev.mode;
-  if (patch.hotkey && patch.hotkey !== prev.hotkey && !registerHotkey(patch.hotkey)) {
-    registerHotkey(prev.hotkey);
-    notice(`${formatHotkey(patch.hotkey)} is used by another app. Keeping ${formatHotkey(prev.hotkey)}.`, 'hotkey unavailable');
+  // Registering again even when unchanged retries a hotkey that failed at startup.
+  if (patch.hotkey && !registerHotkey(patch.hotkey)) {
+    const keeping = patch.hotkey !== prev.hotkey && registerHotkey(prev.hotkey) ? ` Keeping ${formatHotkey(prev.hotkey)}.` : '';
+    notice(`${formatHotkey(patch.hotkey)} is used by another app.${keeping}`, 'hotkey unavailable');
     patch = { ...patch, hotkey: prev.hotkey };
   }
   const next = settings.set(patch);
@@ -302,7 +307,7 @@ function registerHotkey(hotkey: string): boolean {
 
 /** In hidden mode the menu bar hints at the hotkey whenever Chinese text is highlighted. */
 function updateTrayTitle(): void {
-  if (!tray) return;
+  if (!tray || flashTimer) return; // a notice is flashing; it restores the title when it ends
   tray.setTitle(isHidden() && selection.current ? `汉 ${hotkeyLabel()}` : '汉');
 }
 
@@ -425,6 +430,7 @@ app.on('window-all-closed', () => {
 });
 
 void app.whenReady().then(() => {
+  if (!isPrimaryInstance) return; // app.quit() above is async; don't start a second copy meanwhile
   app.dock?.hide();
   const dir = app.getPath('userData');
   settings = new SettingsStore(dir);

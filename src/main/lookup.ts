@@ -30,8 +30,11 @@ const PUNCTUATION: Record<string, string> = {
   '（': '(', '）': ')', '“': '"', '”': '"', '‘': "'", '’': "'", '《': '"', '》': '"', '…': '…',
 };
 const toAsciiPunctuation = (s: string) => Array.from(s, (c) => PUNCTUATION[c] ?? c).join('');
+// Tested on the original text, since “ and ” both become " once converted.
+const CLOSING = /^[，。！？；：、）”’》,.!?;:)\]…]/;
+const OPENING = /[（“‘《([]$/;
 
-const isSecondary =(e: DictEntry) =>
+const isSecondary = (e: DictEntry) =>
   e.defs.every((d) => /^(surname |variant of |old variant of |see |used in )/i.test(d));
 
 export class Dictionary {
@@ -146,13 +149,17 @@ export class Dictionary {
       };
     });
 
-    // Join words with spaces, but attach punctuation to the preceding word: "màn, dànshì".
+    // Join words with spaces, but attach closing punctuation to the preceding word ("màn, dànshì")
+    // and opening punctuation to the following one ("shuō "nǐhǎo"").
     let phrasePinyin = '';
+    let glueNext = false;
     for (const w of words) {
-      const part = w.isHan ? w.pinyin : toAsciiPunctuation(w.hanzi).trim();
+      const original = w.hanzi.trim();
+      const part = w.isHan ? w.pinyin : toAsciiPunctuation(original);
       if (!part) continue;
-      const attach = !w.isHan && /^[,.!?;:)\]…'"]/.test(part);
+      const attach = glueNext || (!w.isHan && CLOSING.test(original));
       phrasePinyin += phrasePinyin && !attach ? ` ${part}` : part;
+      glueNext = !w.isHan && OPENING.test(original);
     }
 
     return { text, pinyin: phrasePinyin, words };
@@ -186,6 +193,7 @@ const myMemory: Provider = async (text, fetchImpl) => {
 };
 
 const HEDGE_AFTER_MS = 1500;
+const CACHE_LIMIT = 500;
 const translationCache = new Map<string, string>();
 
 const attempt = (provider: Provider, text: string, fetchImpl: FetchLike) =>
@@ -221,6 +229,8 @@ export async function translate(text: string, fetchImpl: FetchLike = fetch): Pro
 
   try {
     const result = await Promise.any([primary, hedge]);
+    // Maps keep insertion order, so the first key is the oldest.
+    if (translationCache.size >= CACHE_LIMIT) translationCache.delete(translationCache.keys().next().value!);
     translationCache.set(key, result);
     return result;
   } catch {

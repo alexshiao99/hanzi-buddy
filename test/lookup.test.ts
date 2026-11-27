@@ -55,6 +55,12 @@ describe('pinyin', () => {
     assert.equal(dict.lookup('你好，世界').pinyin, 'nǐhǎo, shìjiè');
   });
 
+  it('attaches opening quotes and brackets to the following word', () => {
+    const empty = new Dictionary();
+    assert.equal(empty.lookup('他说“你好”。').pinyin, 'tā shuō "nǐ hǎo".');
+    assert.equal(empty.lookup('我（很）好').pinyin, 'wǒ (hěn) hǎo');
+  });
+
   it('keeps characters with no known pinyin visible', () => {
     assert.ok(dict.lookup('𠮷野').pinyin.startsWith('𠮷'));
   });
