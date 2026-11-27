@@ -17,7 +17,8 @@ if (existsSync(OUT) && !process.argv.includes('--force')) {
     writeFileSync(OUT, text);
     console.log(`saved ${OUT}`);
   } catch (err) {
-    // Not fatal: the app runs without it (no word meanings). Don't fail the whole npm install.
     console.warn(`⚠ could not download CC-CEDICT (${err.message}). Retry with: node scripts/fetch-dict.mjs`);
+    // The app runs without it (no word meanings), so only a release build (--required) fails here.
+    if (process.argv.includes('--required')) process.exit(1);
   }
 }

@@ -8,7 +8,7 @@
     "start": "node scripts/build.mjs && electron .",
     "test": "node scripts/test.mjs",
     "test:lookup": "node scripts/build.mjs && node dist/test-lookup.js",
-    "dist": "node scripts/build.mjs && electron-builder --mac",
+    "dist": "node scripts/fetch-dict.mjs --required && node scripts/build.mjs && electron-builder --mac",
     "postinstall": "node scripts/fetch-dict.mjs"
   },
   "license": "MIT",

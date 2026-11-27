@@ -59,6 +59,7 @@ describe('pinyin', () => {
     const empty = new Dictionary();
     assert.equal(empty.lookup('他说“你好”。').pinyin, 'tā shuō "nǐ hǎo".');
     assert.equal(empty.lookup('我（很）好').pinyin, 'wǒ (hěn) hǎo');
+    assert.equal(empty.lookup('他说"你好"。').pinyin, 'tā shuō "nǐ hǎo".');
   });
 
   it('keeps characters with no known pinyin visible', () => {

@@ -25,14 +25,35 @@ function normalizeReading(reading: string): string {
     .join(' ');
 }
 
-const PUNCTUATION: Record<string, string> = {
-  '，': ',', '。': '.', '！': '!', '？': '?', '；': ';', '：': ':', '、': ',',
-  '（': '(', '）': ')', '“': '"', '”': '"', '‘': "'", '’': "'", '《': '"', '》': '"', '…': '…',
+/**
+ * How punctuation joins the phrase pinyin. prev: attaches to the word before ("màn, dànshì").
+ * next: attaches to the word after ("shuō (nǐ"). toggle: straight quotes, which open or close in turn.
+ */
+type Glue = 'prev' | 'next' | 'toggle';
+const PUNCTUATION: Record<string, { ascii: string; glue: Glue }> = {};
+const punct = (chars: string, ascii: string | null, glue: Glue) => {
+  for (const c of chars) PUNCTUATION[c] = { ascii: ascii ?? c, glue };
 };
-const toAsciiPunctuation = (s: string) => Array.from(s, (c) => PUNCTUATION[c] ?? c).join('');
-// Tested on the original text, since “ and ” both become " once converted.
-const CLOSING = /^[，。！？；：、）”’》,.!?;:)\]…]/;
-const OPENING = /[（“‘《([]$/;
+punct('，、', ',', 'prev');
+punct('。', '.', 'prev');
+punct('！', '!', 'prev');
+punct('？', '?', 'prev');
+punct('；', ';', 'prev');
+punct('：', ':', 'prev');
+punct('）', ')', 'prev');
+punct('（', '(', 'next');
+punct('”》」』', '"', 'prev');
+punct('“《「『', '"', 'next');
+punct('】', ']', 'prev');
+punct('【', '[', 'next');
+punct('’', "'", 'prev');
+punct('‘', "'", 'next');
+punct(',.!?;:)]…', null, 'prev');
+punct('([', null, 'next');
+punct(`"'`, null, 'toggle');
+
+const toAsciiPunctuation = (s: string) => Array.from(s, (c) => PUNCTUATION[c]?.ascii ?? c).join('');
+const glueOf = (c: string | undefined) => (c ? PUNCTUATION[c]?.glue : undefined);
 
 const isSecondary = (e: DictEntry) =>
   e.defs.every((d) => /^(surname |variant of |old variant of |see |used in )/i.test(d));
@@ -149,17 +170,24 @@ export class Dictionary {
       };
     });
 
-    // Join words with spaces, but attach closing punctuation to the preceding word ("màn, dànshì")
-    // and opening punctuation to the following one ("shuō "nǐhǎo"").
+    // Join words with spaces, gluing punctuation to its neighbour as PUNCTUATION says.
     let phrasePinyin = '';
     let glueNext = false;
+    let inQuote = false; // inside straight quotes, so the next one closes
     for (const w of words) {
       const original = w.hanzi.trim();
       const part = w.isHan ? w.pinyin : toAsciiPunctuation(original);
       if (!part) continue;
-      const attach = glueNext || (!w.isHan && CLOSING.test(original));
+      const first = glueOf(original[0]);
+      const attach = glueNext || first === 'prev' || (first === 'toggle' && inQuote);
       phrasePinyin += phrasePinyin && !attach ? ` ${part}` : part;
-      glueNext = !w.isHan && OPENING.test(original);
+      if (w.isHan) {
+        glueNext = false;
+        continue;
+      }
+      for (const c of original) if (glueOf(c) === 'toggle') inQuote = !inQuote;
+      const last = glueOf(original.at(-1));
+      glueNext = last === 'next' || (last === 'toggle' && inQuote);
     }
 
     return { text, pinyin: phrasePinyin, words };

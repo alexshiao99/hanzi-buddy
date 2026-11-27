@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import type { Bounds, SavedItem, Settings } from '../shared/types';
+import { DEFAULT_HOTKEY } from '../shared/hotkey';
+import { APP_MODES, SAVED_SORTS, type Bounds, type SavedItem, type Settings } from '../shared/types';
 
 /** A JSON file with atomic writes (temp file + rename) so a crash can't corrupt it. */
 class JsonFile<T> {
@@ -37,7 +38,7 @@ export const DEFAULT_SETTINGS: Settings = {
   watchClipboard: true,
   alwaysOnTop: true,
   toneColors: true,
-  hotkey: 'CommandOrControl+Shift+Y',
+  hotkey: DEFAULT_HOTKEY,
   mode: 'card',
   onlineTranslation: true,
   translationNoticeSeen: false,
@@ -49,18 +50,21 @@ const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'obj
 const isBounds = (v: unknown): v is Bounds =>
   isObject(v) && [v.x, v.y, v.width, v.height].every((n) => typeof n === 'number' && Number.isFinite(n));
 
+const BOOLEAN_SETTINGS = ['watchClipboard', 'alwaysOnTop', 'toneColors', 'onlineTranslation', 'translationNoticeSeen'] as const;
+
+const isOneOf = <T extends string>(choices: readonly T[], v: unknown): v is T => choices.includes(v as T);
+
 /** Starts from the defaults so a missing or wrong-typed field in a hand-edited file can't break the app. */
 function sanitizeSettings(raw: Record<string, unknown>): Settings {
   const out: Settings = { ...DEFAULT_SETTINGS };
   if (isBounds(raw.bounds)) out.bounds = raw.bounds;
-  if (typeof raw.watchClipboard === 'boolean') out.watchClipboard = raw.watchClipboard;
-  if (typeof raw.alwaysOnTop === 'boolean') out.alwaysOnTop = raw.alwaysOnTop;
-  if (typeof raw.toneColors === 'boolean') out.toneColors = raw.toneColors;
+  for (const key of BOOLEAN_SETTINGS) {
+    const value = raw[key];
+    if (typeof value === 'boolean') out[key] = value;
+  }
   if (typeof raw.hotkey === 'string' && raw.hotkey) out.hotkey = raw.hotkey;
-  if (raw.mode === 'card' || raw.mode === 'hidden') out.mode = raw.mode;
-  if (typeof raw.onlineTranslation === 'boolean') out.onlineTranslation = raw.onlineTranslation;
-  if (typeof raw.translationNoticeSeen === 'boolean') out.translationNoticeSeen = raw.translationNoticeSeen;
-  if (raw.savedSort === 'recent' || raw.savedSort === 'pinyin' || raw.savedSort === 'practice') out.savedSort = raw.savedSort;
+  if (isOneOf(APP_MODES, raw.mode)) out.mode = raw.mode;
+  if (isOneOf(SAVED_SORTS, raw.savedSort)) out.savedSort = raw.savedSort;
   return out;
 }
 
