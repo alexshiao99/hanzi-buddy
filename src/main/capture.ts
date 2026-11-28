@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { clipboard, systemPreferences } from 'electron';
 import { hasHan } from './lookup';
 
-const MAX_LEN = 300;
+export const MAX_LEN = 300;
 /** Markers password managers and similar apps put on the clipboard (see nspasteboard.org). */
 const PRIVATE_FORMATS = ['org.nspasteboard.ConcealedType', 'org.nspasteboard.TransientType'];
 

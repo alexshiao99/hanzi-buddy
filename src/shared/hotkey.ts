@@ -1,5 +1,7 @@
+export const DEFAULT_HOTKEY = 'CommandOrControl+Shift+Y';
+
 export const HOTKEY_CHOICES = [
-  'CommandOrControl+Shift+Y',
+  DEFAULT_HOTKEY,
   'CommandOrControl+Alt+Y',
   'Control+Shift+Y',
   'Control+Alt+Y',

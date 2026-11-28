@@ -25,13 +25,37 @@ function normalizeReading(reading: string): string {
     .join(' ');
 }
 
-const PUNCTUATION: Record<string, string> = {
-  '，': ',', '。': '.', '！': '!', '？': '?', '；': ';', '：': ':', '、': ',',
-  '（': '(', '）': ')', '“': '"', '”': '"', '‘': "'", '’': "'", '《': '"', '》': '"', '…': '…',
+/**
+ * How punctuation joins the phrase pinyin. prev: attaches to the word before ("màn, dànshì").
+ * next: attaches to the word after ("shuō (nǐ"). toggle: straight quotes, which open or close in turn.
+ */
+type Glue = 'prev' | 'next' | 'toggle';
+const PUNCTUATION: Record<string, { ascii: string; glue: Glue }> = {};
+const punct = (chars: string, ascii: string | null, glue: Glue) => {
+  for (const c of chars) PUNCTUATION[c] = { ascii: ascii ?? c, glue };
 };
-const toAsciiPunctuation = (s: string) => Array.from(s, (c) => PUNCTUATION[c] ?? c).join('');
+punct('，、', ',', 'prev');
+punct('。', '.', 'prev');
+punct('！', '!', 'prev');
+punct('？', '?', 'prev');
+punct('；', ';', 'prev');
+punct('：', ':', 'prev');
+punct('）', ')', 'prev');
+punct('（', '(', 'next');
+punct('”》」』', '"', 'prev');
+punct('“《「『', '"', 'next');
+punct('】', ']', 'prev');
+punct('【', '[', 'next');
+punct('’', "'", 'prev');
+punct('‘', "'", 'next');
+punct(',.!?;:)]…', null, 'prev');
+punct('([', null, 'next');
+punct(`"'`, null, 'toggle');
 
-const isSecondary =(e: DictEntry) =>
+const toAsciiPunctuation = (s: string) => Array.from(s, (c) => PUNCTUATION[c]?.ascii ?? c).join('');
+const glueOf = (c: string | undefined) => (c ? PUNCTUATION[c]?.glue : undefined);
+
+const isSecondary = (e: DictEntry) =>
   e.defs.every((d) => /^(surname |variant of |old variant of |see |used in )/i.test(d));
 
 export class Dictionary {
@@ -146,13 +170,24 @@ export class Dictionary {
       };
     });
 
-    // Join words with spaces, but attach punctuation to the preceding word: "màn, dànshì".
+    // Join words with spaces, gluing punctuation to its neighbour as PUNCTUATION says.
     let phrasePinyin = '';
+    let glueNext = false;
+    let inQuote = false; // inside straight quotes, so the next one closes
     for (const w of words) {
-      const part = w.isHan ? w.pinyin : toAsciiPunctuation(w.hanzi).trim();
+      const original = w.hanzi.trim();
+      const part = w.isHan ? w.pinyin : toAsciiPunctuation(original);
       if (!part) continue;
-      const attach = !w.isHan && /^[,.!?;:)\]…'"]/.test(part);
+      const first = glueOf(original[0]);
+      const attach = glueNext || first === 'prev' || (first === 'toggle' && inQuote);
       phrasePinyin += phrasePinyin && !attach ? ` ${part}` : part;
+      if (w.isHan) {
+        glueNext = false;
+        continue;
+      }
+      for (const c of original) if (glueOf(c) === 'toggle') inQuote = !inQuote;
+      const last = glueOf(original.at(-1));
+      glueNext = last === 'next' || (last === 'toggle' && inQuote);
     }
 
     return { text, pinyin: phrasePinyin, words };
@@ -186,6 +221,7 @@ const myMemory: Provider = async (text, fetchImpl) => {
 };
 
 const HEDGE_AFTER_MS = 1500;
+const CACHE_LIMIT = 500;
 const translationCache = new Map<string, string>();
 
 const attempt = (provider: Provider, text: string, fetchImpl: FetchLike) =>
@@ -221,6 +257,8 @@ export async function translate(text: string, fetchImpl: FetchLike = fetch): Pro
 
   try {
     const result = await Promise.any([primary, hedge]);
+    // Maps keep insertion order, so the first key is the oldest.
+    if (translationCache.size >= CACHE_LIMIT) translationCache.delete(translationCache.keys().next().value!);
     translationCache.set(key, result);
     return result;
   } catch {

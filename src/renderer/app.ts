@@ -1,6 +1,6 @@
 import { hotkeyLabel } from '../shared/hotkey';
 import { groupSaved, plain } from '../shared/saved-order';
-import type { HanziApi, LookupResult, SavedItem, SavedSort, Settings, WordInfo } from '../shared/types';
+import { canTranslate, type HanziApi, type LookupResult, type SavedItem, type SavedSort, type Settings, type WordInfo } from '../shared/types';
 
 declare global {
   interface Window {
@@ -93,10 +93,8 @@ function switchView(view: View): void {
   if (view === 'review') startReview();
 }
 
-const canTranslate = (s: Settings | undefined) => !!s && s.onlineTranslation && s.translationNoticeSeen;
-
 function applySettings(s: Settings): void {
-  const couldTranslate = canTranslate(settings);
+  const couldTranslate = !!settings && canTranslate(settings);
   const previousSort = settings?.savedSort;
   settings = s;
   $<HTMLSelectElement>('saved-sort').value = s.savedSort;
@@ -136,21 +134,22 @@ const say = (text: string, slow = false) => void api.speak(text, slow);
 async function showLookup(text: string): Promise<void> {
   const seq = ++lookupSeq;
   switchView('lookup');
+  const translation = api.translate(text); // independent of the lookup, so start both at once
   const result = await api.lookup(text);
   if (seq !== lookupSeq) return;
   current = { result, translation: null, translating: true };
   renderResult();
   $('words').toggleAttribute('open', result.words.filter((w) => w.isHan).length <= 3);
   document.querySelector('main')?.scrollTo(0, 0);
-  await runTranslation(result, seq);
+  await runTranslation(result, seq, translation);
 }
 
-async function runTranslation(result: LookupResult, seq: number): Promise<void> {
+async function runTranslation(result: LookupResult, seq: number, pending = api.translate(result.text)): Promise<void> {
   if (current && seq === lookupSeq) {
     current.translating = true;
     renderResult();
   }
-  const translation = await api.translate(result.text);
+  const translation = await pending;
   // Runs even if another lookup has started, since this phrase may have been saved in the meantime.
   if (translation) await replaceSavedGloss(result, translation);
   if (seq !== lookupSeq || !current) return;
@@ -333,9 +332,9 @@ function editNote(item: SavedItem, container: HTMLElement): void {
   const finish = async (save: boolean) => {
     if (done) return;
     done = true;
-    if (save && input.value !== item.note) await api.updateSaved(item.id, { note: input.value.trim() });
-    await refreshSaved();
-    renderSaved();
+    const note = input.value.trim();
+    if (save && note !== item.note) await api.updateSaved(item.id, { note });
+    await refreshSaved(); // re-renders the saved list, which removes the input
   };
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') void finish(true);
@@ -402,8 +401,7 @@ async function grade(gotIt: boolean): Promise<void> {
   });
   sessionReviewed++;
   savedItems = await api.listSaved();
-  reviewItem = savedItems.find((s) => s.id === i.id) ?? null;
-  startReview();
+  startReview(); // reviewItem is still `i`, so pickNext won't repeat it
 }
 
 // ---- wiring -------------------------------------------------------------------------------------

@@ -62,9 +62,14 @@ export interface Settings {
   savedSort: SavedSort;
 }
 
-export type AppMode = 'card' | 'hidden';
+export const APP_MODES = ['card', 'hidden'] as const;
+export type AppMode = (typeof APP_MODES)[number];
 
-export type SavedSort = 'recent' | 'pinyin' | 'practice';
+export const SAVED_SORTS = ['recent', 'pinyin', 'practice'] as const;
+export type SavedSort = (typeof SAVED_SORTS)[number];
+
+/** Text is only sent to online translators once the user has answered the first-run notice. */
+export const canTranslate = (s: Settings): boolean => s.onlineTranslation && s.translationNoticeSeen;
 
 export type IncomingSource = 'clipboard' | 'hotkey';
 

@@ -14,15 +14,16 @@ import {
   shell,
   Tray,
 } from 'electron';
-import type { AppMode, IncomingSource, SavedItem, Settings } from '../shared/types';
+import { canTranslate, type AppMode, type IncomingSource, type SavedItem, type Settings } from '../shared/types';
 import { HOTKEY_CHOICES, hotkeyLabel as formatHotkey } from '../shared/hotkey';
-import { ClipboardWatcher, grabSelection, hasAccessibility } from './capture';
+import { ClipboardWatcher, grabSelection, hasAccessibility, MAX_LEN } from './capture';
 import { Dictionary, translate } from './lookup';
 import { SelectionWatcher } from './selection';
 import { speak } from './speech';
 import { SavedStore, SettingsStore } from './storage';
 
-if (!app.requestSingleInstanceLock()) app.quit();
+// Exit at once (app.quit() is async and would let this copy start up first); the running one gets 'second-instance'.
+if (!app.requestSingleInstanceLock()) app.exit(0);
 
 let win: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -170,12 +171,13 @@ function hidePopup(): void {
 function applyMode(mode: AppMode): void {
   if (!win) return;
   if (mode === 'hidden') {
-    if (!hasAccessibility(false)) hasAccessibility(true);
+    hasAccessibility(true); // prompts only if not yet allowed
     selection.start();
     applyAlwaysOnTop(win, true);
     hidePopup();
   } else {
     selection.stop();
+    trayFlash = ''; // the card shows notices itself
     if (app.isHidden()) app.show(); // the popup hides the whole app, and a hidden app can't show windows
     applyAlwaysOnTop(win, settings.get().alwaysOnTop);
     win.setBounds(cardBounds());
@@ -218,13 +220,18 @@ function snapshot(): void {
   }, 2500);
 }
 
+let trayFlash = '';
 let flashTimer: NodeJS.Timeout | undefined;
 /** In card mode notices appear as a toast; in hidden mode they flash briefly in the menu bar. */
 function notice(message: string, short = message): void {
   if (isHidden()) {
-    tray?.setTitle(`汉 ${short}`);
+    trayFlash = short;
+    updateTrayTitle();
     clearTimeout(flashTimer);
-    flashTimer = setTimeout(updateTrayTitle, 2500);
+    flashTimer = setTimeout(() => {
+      trayFlash = '';
+      updateTrayTitle();
+    }, 2500);
     return;
   }
   showCard();
@@ -233,19 +240,14 @@ function notice(message: string, short = message): void {
 
 function updateSettings(patch: Partial<Settings>): Settings {
   const prev = settings.get();
-  const prevMode = prev.mode;
-  if (patch.hotkey && patch.hotkey !== prev.hotkey && !registerHotkey(patch.hotkey)) {
-    registerHotkey(prev.hotkey);
-    notice(`${formatHotkey(patch.hotkey)} is used by another app. Keeping ${formatHotkey(prev.hotkey)}.`, 'hotkey unavailable');
-    patch = { ...patch, hotkey: prev.hotkey };
-  }
+  if (patch.hotkey && !setHotkey(patch.hotkey)) patch = { ...patch, hotkey: prev.hotkey };
   const next = settings.set(patch);
   if (patch.watchClipboard !== undefined) {
     if (next.watchClipboard) watcher.start();
     else watcher.stop();
   }
   if (patch.alwaysOnTop !== undefined && win && !isHidden()) applyAlwaysOnTop(win, next.alwaysOnTop);
-  if (next.mode !== prevMode) applyMode(next.mode);
+  if (next.mode !== prev.mode) applyMode(next.mode);
   sendToRenderer('settings', next);
   rebuildTrayMenu();
   return next;
@@ -261,8 +263,8 @@ async function onHotkey(): Promise<void> {
     hidePopup();
     return;
   }
-  if (!hasAccessibility(false)) {
-    hasAccessibility(true); // shows the macOS permission prompt
+  if (!hasAccessibility(true)) {
+    // macOS has just shown its permission prompt
     notice(
       'To grab highlighted text, allow this app in System Settings → Privacy & Security → Accessibility, then try again.',
       'needs Accessibility permission',
@@ -279,7 +281,7 @@ async function onHotkey(): Promise<void> {
     }
     const grabbed = await grabSelection(resourcePath('bin', 'clipboard-grab'), watcher);
     if (grabbed.status === 'text') sendIncoming(grabbed.text, 'hotkey');
-    else if (grabbed.status === 'too-long') notice('That selection is too long. Select 300 characters or fewer.', 'selection too long');
+    else if (grabbed.status === 'too-long') notice(`That selection is too long. Select ${MAX_LEN} characters or fewer.`, 'selection too long');
     else if (grabbed.status === 'helper-missing') notice('The selection helper is missing. Install Xcode Command Line Tools and rebuild.', 'helper missing');
     else notice('No Chinese text selected.', 'no Chinese selected');
   } catch {
@@ -289,13 +291,28 @@ async function onHotkey(): Promise<void> {
   }
 }
 
-function registerHotkey(hotkey: string): boolean {
-  globalShortcut.unregisterAll();
+let activeHotkey: string | null = null;
+
+/**
+ * Switches the global hotkey. The new one is registered before the old one is released, so a hotkey
+ * that's taken (or not a valid accelerator) leaves the working one in place.
+ */
+function setHotkey(hotkey: string): boolean {
+  if (hotkey === activeHotkey) return true;
+  let ok = false;
   try {
-    return globalShortcut.register(hotkey, () => void onHotkey());
+    ok = globalShortcut.register(hotkey, () => void onHotkey());
   } catch {
-    return false; // not a valid accelerator (hand-edited settings)
+    // not a valid accelerator (hand-edited settings)
   }
+  if (!ok) {
+    const fallback = activeHotkey ? `Keeping ${formatHotkey(activeHotkey)}.` : 'Pick another hotkey in the 汉 menu.';
+    notice(`${formatHotkey(hotkey)} is used by another app. ${fallback}`, 'hotkey unavailable');
+    return false;
+  }
+  if (activeHotkey) globalShortcut.unregister(activeHotkey);
+  activeHotkey = hotkey;
+  return true;
 }
 
 // ---- tray ---------------------------------------------------------------------------------------
@@ -303,7 +320,8 @@ function registerHotkey(hotkey: string): boolean {
 /** In hidden mode the menu bar hints at the hotkey whenever Chinese text is highlighted. */
 function updateTrayTitle(): void {
   if (!tray) return;
-  tray.setTitle(isHidden() && selection.current ? `汉 ${hotkeyLabel()}` : '汉');
+  const hint = trayFlash || (isHidden() && selection.current ? hotkeyLabel() : '');
+  tray.setTitle(hint ? `汉 ${hint}` : '汉');
 }
 
 function rebuildTrayMenu(): void {
@@ -330,7 +348,7 @@ function rebuildTrayMenu(): void {
         label: 'Online translation',
         sublabel: 'Sends looked-up text to Google Translate and MyMemory',
         type: 'checkbox',
-        checked: s.onlineTranslation && s.translationNoticeSeen,
+        checked: canTranslate(s),
         click: (i) => updateSettings({ onlineTranslation: i.checked, translationNoticeSeen: true }),
       },
       { type: 'separator' },
@@ -353,8 +371,7 @@ function rebuildTrayMenu(): void {
 function toggleCard(): void {
   if (!win) return;
   if (win.isVisible()) win.hide();
-  else win.show();
-  rebuildTrayMenu();
+  else win.show(); // the window's show/hide events rebuild the tray menu
 }
 
 function createTray(): void {
@@ -370,8 +387,7 @@ function registerIpc(): void {
   ipcMain.handle('lookup', (_e, text: string) => getDict().lookup(text));
   // net.fetch uses Chromium's network stack.
   ipcMain.handle('translate', (_e, text: string) => {
-    const { onlineTranslation, translationNoticeSeen } = settings.get();
-    if (!onlineTranslation || !translationNoticeSeen) return null;
+    if (!canTranslate(settings.get())) return null;
     return translate(text, (url, init) => net.fetch(url, init));
   });
   ipcMain.handle('speak', (_e, text: string, slow: boolean) => speak(text, slow));
@@ -405,7 +421,6 @@ function registerIpc(): void {
   ipcMain.handle('window:hide', () => {
     if (isHidden()) hidePopup();
     else win?.hide();
-    rebuildTrayMenu();
   });
 }
 
@@ -437,10 +452,7 @@ void app.whenReady().then(() => {
   win.on('show', rebuildTrayMenu);
   win.on('hide', rebuildTrayMenu);
   createTray();
-  const { hotkey } = settings.get();
-  if (!registerHotkey(hotkey)) {
-    notice(`${formatHotkey(hotkey)} is used by another app. Pick another hotkey in the 汉 menu.`, 'hotkey unavailable');
-  }
+  setHotkey(settings.get().hotkey);
   if (settings.get().watchClipboard) watcher.start();
   if (isHidden()) selection.start();
   setTimeout(getDict, 50); // warm the dictionary (~200ms) after the window is up

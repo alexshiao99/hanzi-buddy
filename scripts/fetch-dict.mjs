@@ -9,9 +9,16 @@ if (existsSync(OUT) && !process.argv.includes('--force')) {
   console.log(`${OUT} already present`);
 } else {
   console.log(`downloading CC-CEDICT…`);
-  const res = await fetch(URL);
-  if (!res.ok) throw new Error(`download failed: HTTP ${res.status}`);
-  mkdirSync('data', { recursive: true });
-  writeFileSync(OUT, gunzipSync(Buffer.from(await res.arrayBuffer())));
-  console.log(`saved ${OUT}`);
+  try {
+    const res = await fetch(URL);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const text = gunzipSync(Buffer.from(await res.arrayBuffer()));
+    mkdirSync('data', { recursive: true });
+    writeFileSync(OUT, text);
+    console.log(`saved ${OUT}`);
+  } catch (err) {
+    console.warn(`⚠ could not download CC-CEDICT (${err.message}). Retry with: node scripts/fetch-dict.mjs`);
+    // The app runs without it (no word meanings), so only a release build (--required) fails here.
+    if (process.argv.includes('--required')) process.exit(1);
+  }
 }
